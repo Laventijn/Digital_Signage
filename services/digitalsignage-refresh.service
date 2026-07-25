@@ -8,6 +8,4 @@ ExecStart=/opt/digitalsignage/scripts/refresh-presentation.py
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-StateDirectory=digitalsignage
-StateDirectoryMode=0755
 ReadOnlyPaths=/etc/digitalsignage

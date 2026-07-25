@@ -1,0 +1,11 @@
+[Unit]
+Description=Digital Signage RAM- en swaplogging elke 10 minuten
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=10min
+AccuracySec=30s
+Unit=digitalsignage-resource-log.service
+
+[Install]
+WantedBy=timers.target

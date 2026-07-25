@@ -1,0 +1,13 @@
+[Unit]
+Description=Digital Signage RAM- en swaplogging
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/digitalsignage/scripts/log-resources.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+StateDirectory=digitalsignage
+StateDirectoryMode=0755
+ReadOnlyPaths=/etc/digitalsignage

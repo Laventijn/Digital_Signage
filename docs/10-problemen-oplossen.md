@@ -48,10 +48,24 @@ systemctl --user start digitalsignage-refresh.service
 
 ## RAM- En Swaplog
 
-Iedere refreshpoging schrijft exact een compacte regel naar:
+RAM- en swaplogging staat los van de presentatie-refresh. De presentatie wordt
+standaard iedere 30 seconden vernieuwd, terwijl `digitalsignage-resource-log.timer`
+iedere 10 minuten een compacte regel schrijft naar:
 
 ```bash
 ~/.local/state/digitalsignage/swap.log
+```
+
+Status bekijken:
+
+```bash
+systemctl --user status digitalsignage-resource-log.timer
+```
+
+Handmatig een logregel schrijven:
+
+```bash
+systemctl --user start digitalsignage-resource-log.service
 ```
 
 Live meekijken:
@@ -65,3 +79,5 @@ Bij uninstall wordt dit log niet standaard verwijderd. Handmatig opruimen kan me
 ```bash
 rm -f ~/.local/state/digitalsignage/swap.log ~/.local/state/digitalsignage/swap.log.1
 ```
+
+Logregels ouder dan 3 dagen worden automatisch verwijderd.

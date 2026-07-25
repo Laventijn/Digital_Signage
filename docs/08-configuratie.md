@@ -24,8 +24,10 @@ Zie `config/digitalsignage.conf.example` voor alle opties.
 - `CACHE_SIZE_MB`: begrensde Chromium-cachegrootte in MiB.
 - `KIOSK_USER`: lokale kioskgebruiker.
 - `SWAP_LOG_MAX_BYTES`: maximale grootte van `swap.log` voor rotatie.
+- `RESOURCE_LOG_RETENTION_DAYS`: aantal dagen dat RAM- en swaplogregels bewaard blijven.
 
 `REFRESH_SECONDS` wijzigt momenteel nog niet automatisch de systemd timerwaarde. De timer staat standaard op 30 seconden in `digitalsignage-refresh.timer`.
+De resource-logtimer staat standaard op 10 minuten in `digitalsignage-resource-log.timer`.
 
 Plaats geen wachtwoorden, Wi-Fi-sleutels, tokens of andere geheimen in dit configuratiebestand wanneer het in Git terecht kan komen.
 

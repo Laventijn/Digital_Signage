@@ -72,7 +72,7 @@ test_user_and_config() {
 test_install_paths() {
   local failed=0
   local path
-  for path in /opt/digitalsignage /etc/digitalsignage/digitalsignage.conf /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py; do
+  for path in /opt/digitalsignage /etc/digitalsignage/digitalsignage.conf /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py; do
     if [ -e "${path}" ]; then
       log_ok "Installatiepad bestaat: ${path}"
     else
@@ -81,7 +81,7 @@ test_install_paths() {
     fi
   done
 
-  for path in /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py; do
+  for path in /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py; do
     if [ -x "${path}" ]; then
       log_ok "Script is uitvoerbaar: ${path}"
     else
@@ -128,14 +128,16 @@ test_user_systemd() {
     return 1
   fi
 
-  for unit in digitalsignage-kiosk.service digitalsignage-refresh.service digitalsignage-refresh.timer; do
+  for unit in digitalsignage-kiosk.service digitalsignage-refresh.service digitalsignage-refresh.timer digitalsignage-resource-log.service digitalsignage-resource-log.timer; do
     run_user_systemctl status "${unit}" --no-pager || log_warning "Statuscontrole gaf niet-nul exitcode voor ${unit}"
   done
 
   run_user_systemctl is-enabled digitalsignage-kiosk.service >/dev/null && log_ok "Kioskservice is enabled" || { log_error "Kioskservice is niet enabled"; failed=1; }
   run_user_systemctl is-enabled digitalsignage-refresh.timer >/dev/null && log_ok "Refreshtimer is enabled" || { log_error "Refreshtimer is niet enabled"; failed=1; }
+  run_user_systemctl is-enabled digitalsignage-resource-log.timer >/dev/null && log_ok "Resource-logtimer is enabled" || { log_error "Resource-logtimer is niet enabled"; failed=1; }
   run_user_systemctl is-active digitalsignage-kiosk.service >/dev/null && log_ok "Kioskservice is actief" || { log_error "Kioskservice is niet actief"; failed=1; }
   run_user_systemctl is-active digitalsignage-refresh.timer >/dev/null && log_ok "Refreshtimer is actief" || { log_error "Refreshtimer is niet actief"; failed=1; }
+  run_user_systemctl is-active digitalsignage-resource-log.timer >/dev/null && log_ok "Resource-logtimer is actief" || { log_error "Resource-logtimer is niet actief"; failed=1; }
 
   return "${failed}"
 }
@@ -226,25 +228,36 @@ test_manual_refresh() {
   return "${failed}"
 }
 
-test_refresh_log() {
+test_resource_log() {
   local failed=0
   local log_file="${KIOSK_HOME}/.local/state/digitalsignage/swap.log"
+  run_user_systemctl start digitalsignage-resource-log.service || {
+    log_error "Handmatige resource-logservice start faalt"
+    return 1
+  }
+
+  local journal
+  journal="$(run_user_systemctl show digitalsignage-resource-log.service -p Result -p ExecMainStatus -p ExecMainCode --no-pager 2>&1 || true)"
+  printf '%s\n' "${journal}"
+  printf '%s\n' "${journal}" | grep -E '226/NAMESPACE|Failed to set up mount namespacing' >/dev/null && { log_error "Namespacefout gevonden bij resource-logservice"; failed=1; }
+  printf '%s\n' "${journal}" | grep -F 'ExecMainStatus=0' >/dev/null && log_ok "Resource-log exitstatus 0" || { log_error "Resource-log exitstatus is niet 0"; failed=1; }
+
   if [ -f "${log_file}" ]; then
-    log_ok "Refreshlog bestaat: ${log_file}"
+    log_ok "Resource-log bestaat: ${log_file}"
   else
-    log_error "Refreshlog ontbreekt: ${log_file}"
+    log_error "Resource-log ontbreekt: ${log_file}"
     return 1
   fi
 
   if sudo -u "${KIOSK_USER}" test -r "${log_file}" && sudo -u "${KIOSK_USER}" test -w "${log_file}"; then
-    log_ok "Refreshlog is leesbaar en schrijfbaar voor kioskgebruiker"
+    log_ok "Resource-log is leesbaar en schrijfbaar voor kioskgebruiker"
   else
-    log_error "Refreshlog is niet leesbaar en schrijfbaar voor kioskgebruiker"
+    log_error "Resource-log is niet leesbaar en schrijfbaar voor kioskgebruiker"
     failed=1
   fi
 
   tail -n 5 "${log_file}"
-  tail -n 5 "${log_file}" | grep -F 'refresh=ok' >/dev/null && log_ok "Laatste logregels bevatten refresh=ok" || { log_error "Geen refresh=ok in laatste logregels"; failed=1; }
+  tail -n 5 "${log_file}" | grep -F 'resource=ok' >/dev/null && log_ok "Laatste logregels bevatten resource=ok" || { log_error "Geen resource=ok in laatste logregels"; failed=1; }
   tail -n 5 "${log_file}" | grep -E 'ram_used_mib=.*ram_available_mib=.*swap_used_mib=.*swap_free_mib=' >/dev/null && log_ok "RAM- en swapvelden aanwezig" || { log_error "RAM- en swapvelden ontbreken"; failed=1; }
   return "${failed}"
 }
@@ -253,9 +266,15 @@ test_timer() {
   run_user_systemctl list-timers --all --no-pager | grep digitalsignage || true
   if run_user_systemctl list-timers --all --no-pager | grep -F 'digitalsignage-refresh.timer' >/dev/null; then
     log_ok "Refreshtimer heeft timerinformatie"
+  else
+    log_error "Refreshtimer ontbreekt in list-timers"
+    return 1
+  fi
+  if run_user_systemctl list-timers --all --no-pager | grep -F 'digitalsignage-resource-log.timer' >/dev/null; then
+    log_ok "Resource-logtimer heeft timerinformatie"
     return 0
   fi
-  log_error "Refreshtimer ontbreekt in list-timers"
+  log_error "Resource-logtimer ontbreekt in list-timers"
   return 1
 }
 
@@ -284,7 +303,7 @@ test_system_status() {
 
 test_journals() {
   local unit
-  for unit in digitalsignage-kiosk.service digitalsignage-refresh.service digitalsignage-refresh.timer; do
+  for unit in digitalsignage-kiosk.service digitalsignage-refresh.service digitalsignage-refresh.timer digitalsignage-resource-log.service digitalsignage-resource-log.timer; do
     log_info "Laatste journalregels voor ${unit}"
     run_user_systemctl --no-pager status "${unit}" >/dev/null 2>&1 || true
     sudo -u "${KIOSK_USER}" \
@@ -302,7 +321,7 @@ run_test "User-systemd" test_user_systemd
 run_test "Chromium" test_chromium
 run_test "Debugpoort" test_debug_port
 run_test "Handmatige refresh" test_manual_refresh
-run_test "Refreshlog" test_refresh_log
+run_test "Resource-log" test_resource_log
 run_test "Timer" test_timer
 run_test "Systeemstatus" test_system_status
 run_test "Journals" test_journals

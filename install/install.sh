@@ -62,11 +62,13 @@ install_user_units() {
   cp "${PROJECT_ROOT}/services/digitalsignage-kiosk.service" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-refresh.service" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-refresh.timer" "${user_unit_dir}/"
+  cp "${PROJECT_ROOT}/services/digitalsignage-resource-log.service" "${user_unit_dir}/"
+  cp "${PROJECT_ROOT}/services/digitalsignage-resource-log.timer" "${user_unit_dir}/"
   chown -R "${KIOSK_USER}:${KIOSK_USER}" "${user_home}/.config"
 
-  # Maak de gebruikersstatusmap voordat user-services starten. De refreshservice
-  # gebruikt deze map voor swap.log; zonder bestaande map kan systemd sandboxing
-  # falen met status=226/NAMESPACE.
+  # Maak de gebruikersstatusmap voordat user-services starten. De resource-
+  # logservice gebruikt deze map voor swap.log; zonder bestaande map kan
+  # systemd sandboxing falen met status=226/NAMESPACE.
   user_state_dir="${user_home}/.local/state/digitalsignage"
   install -d -m 0755 -o "${KIOSK_USER}" -g "${user_group}" "${user_state_dir}"
 
@@ -76,12 +78,14 @@ install_user_units() {
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user daemon-reload
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-kiosk.service
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-refresh.timer
+    runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-resource-log.timer
   else
     echo "Geen actieve usersessie gevonden voor '${KIOSK_USER}'; user-services zijn geinstalleerd maar niet gestart."
     echo "Start na aanmelden als '${KIOSK_USER}':"
     echo "  systemctl --user daemon-reload"
     echo "  systemctl --user enable --now digitalsignage-kiosk.service"
     echo "  systemctl --user enable --now digitalsignage-refresh.timer"
+    echo "  systemctl --user enable --now digitalsignage-resource-log.timer"
   fi
 }
 
@@ -108,6 +112,7 @@ cp "${PROJECT_ROOT}/services/digitalsignage-healthcheck.service" "${SERVICE_DIR}
 cp "${PROJECT_ROOT}/services/digitalsignage-healthcheck.timer" "${SERVICE_DIR}/"
 chmod +x "${INSTALL_DIR}/scripts/"*.sh
 chmod +x "${INSTALL_DIR}/scripts/refresh-presentation.py"
+chmod +x "${INSTALL_DIR}/scripts/log-resources.py"
 install_user_units
 
 systemctl daemon-reload

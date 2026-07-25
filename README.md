@@ -21,7 +21,7 @@ Het doelplatform is Raspberry Pi OS Trixie 64-bit met Wayland/labwc en Chromium 
 sudo bash install/install.sh
 ```
 
-## Google Slides Refresh
+## Google Slides Refresh En Resource-Logging
 
 De presentatie wordt vernieuwd via Chrome DevTools Protocol. Dit gebruikt geen F5, Ctrl+R of gesimuleerde toetsen. Google Slides voegt tijdens het afspelen vaak `&slide=id...` toe aan de URL; `Page.navigate` stuurt het bestaande tabblad telkens terug naar de oorspronkelijke `PRESENTATION_URL`.
 
@@ -39,7 +39,7 @@ Bekijk de user-timer als kioskgebruiker:
 systemctl --user status digitalsignage-refresh.timer
 ```
 
-Voer handmatig een refresh uit:
+Voer handmatig een presentatie-refresh uit:
 
 ```bash
 systemctl --user start digitalsignage-refresh.service
@@ -56,6 +56,11 @@ Live meekijken:
 ```bash
 tail -f ~/.local/state/digitalsignage/swap.log
 ```
+
+Die resource-log staat los van de presentatie-refresh. De presentatie wordt
+standaard iedere 30 seconden vernieuwd, terwijl RAM en swap iedere 10 minuten
+worden opgeslagen via `digitalsignage-resource-log.timer`. Logregels ouder dan
+3 dagen worden automatisch opgeruimd.
 
 ## Documentatie
 

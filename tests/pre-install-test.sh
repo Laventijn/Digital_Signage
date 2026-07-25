@@ -94,9 +94,12 @@ test_repository() {
     "install/uninstall.sh"
     "scripts/start-kiosk.sh"
     "scripts/refresh-presentation.py"
+    "scripts/log-resources.py"
     "services/digitalsignage-kiosk.service"
     "services/digitalsignage-refresh.service"
     "services/digitalsignage-refresh.timer"
+    "services/digitalsignage-resource-log.service"
+    "services/digitalsignage-resource-log.timer"
     "config/digitalsignage.conf.example"
   )
 
@@ -152,16 +155,16 @@ test_bash_syntax() {
 test_python_syntax() {
   local cache_dir="${TEST_ROOT_DIR}/scripts/__pycache__"
   local before_marker after_marker
-  before_marker="$(find "${cache_dir}" -type f -name 'refresh-presentation*.pyc' -print 2>/dev/null || true)"
-  if python3 -m py_compile "${TEST_ROOT_DIR}/scripts/refresh-presentation.py"; then
+  before_marker="$(find "${cache_dir}" -type f \( -name 'refresh-presentation*.pyc' -o -name 'log-resources*.pyc' \) -print 2>/dev/null || true)"
+  if python3 -m py_compile "${TEST_ROOT_DIR}/scripts/refresh-presentation.py" "${TEST_ROOT_DIR}/scripts/log-resources.py"; then
     log_ok "Python-syntaxis is geldig"
   else
     log_error "Python-syntaxiscontrole faalt"
     return 1
   fi
-  after_marker="$(find "${cache_dir}" -type f -name 'refresh-presentation*.pyc' -print 2>/dev/null || true)"
+  after_marker="$(find "${cache_dir}" -type f \( -name 'refresh-presentation*.pyc' -o -name 'log-resources*.pyc' \) -print 2>/dev/null || true)"
   if [ -n "${after_marker}" ] && [ "${after_marker}" != "${before_marker}" ]; then
-    find "${cache_dir}" -type f -name 'refresh-presentation*.pyc' -delete 2>/dev/null || true
+    find "${cache_dir}" -type f \( -name 'refresh-presentation*.pyc' -o -name 'log-resources*.pyc' \) -delete 2>/dev/null || true
     rmdir "${cache_dir}" 2>/dev/null || true
     log_info "Door py_compile gemaakte cache veilig opgeruimd"
   fi
@@ -171,7 +174,7 @@ test_python_syntax() {
 test_systemd_units() {
   local failed=0
   local output status unit
-  for unit in services/digitalsignage-kiosk.service services/digitalsignage-refresh.service services/digitalsignage-refresh.timer; do
+  for unit in services/digitalsignage-kiosk.service services/digitalsignage-refresh.service services/digitalsignage-refresh.timer services/digitalsignage-resource-log.service services/digitalsignage-resource-log.timer; do
     output="$(systemd-analyze --user verify "${TEST_ROOT_DIR}/${unit}" 2>&1)"
     status=$?
     if [ -n "${output}" ]; then
@@ -208,7 +211,7 @@ test_config() {
   local failed=0
   local config="${TEST_ROOT_DIR}/config/digitalsignage.conf.example"
   local key value
-  for key in PRESENTATION_URL OFFLINE_URL CHROMIUM_BIN WAYLAND_DISPLAY REMOTE_DEBUG_HOST REMOTE_DEBUG_PORT CACHE_SIZE_MB KIOSK_USER REFRESH_SECONDS SWAP_LOG_MAX_BYTES; do
+  for key in PRESENTATION_URL OFFLINE_URL CHROMIUM_BIN WAYLAND_DISPLAY REMOTE_DEBUG_HOST REMOTE_DEBUG_PORT CACHE_SIZE_MB KIOSK_USER REFRESH_SECONDS SWAP_LOG_MAX_BYTES RESOURCE_LOG_RETENTION_DAYS; do
     if [ -n "$(read_config_value "${key}" "${config}")" ]; then
       log_ok "Configvariabele aanwezig: ${key}"
     else
@@ -253,14 +256,14 @@ test_state_directory_fix() {
     log_ok "Geen hardcoded kiosk-homefolder gevonden"
   fi
 
-  if grep -q '^ReadWritePaths=' "${TEST_ROOT_DIR}/services/digitalsignage-refresh.service"; then
-    log_error "Refreshservice gebruikt nog ReadWritePaths"
+  if grep -q '^ReadWritePaths=' "${TEST_ROOT_DIR}/services/digitalsignage-resource-log.service"; then
+    log_error "Resource-logservice gebruikt nog ReadWritePaths"
     failed=1
   else
-    log_ok "Refreshservice gebruikt geen fragiele ReadWritePaths"
+    log_ok "Resource-logservice gebruikt geen fragiele ReadWritePaths"
   fi
 
-  if grep -q '^StateDirectory=digitalsignage$' "${TEST_ROOT_DIR}/services/digitalsignage-refresh.service"; then
+  if grep -q '^StateDirectory=digitalsignage$' "${TEST_ROOT_DIR}/services/digitalsignage-resource-log.service"; then
     log_ok "StateDirectory=digitalsignage aanwezig"
   else
     log_error "StateDirectory=digitalsignage ontbreekt"

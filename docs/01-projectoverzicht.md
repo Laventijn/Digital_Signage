@@ -1,10 +1,157 @@
 # Projectoverzicht
 
-VS Digital Signage voorziet een kioskmodus die automatisch een ingestelde webpagina opent. Bij netwerkproblemen kan een lokale offlinepagina getoond worden.
+VS Digital Signage toont automatisch een Google Slides-presentatie op een Raspberry Pi in Chromium-kioskmodus.
+
+Het project is bedoeld voor een stabiele, onderhoudbare kiosk die door een ICT-medewerker opnieuw geinstalleerd, getest en beheerd kan worden.
 
 ## Doel
 
-- Eenvoudige installatie op Linux.
-- Centrale configuratie via een configbestand.
-- Automatisch starten na boot.
-- Basisdiagnose voor netwerk en kioskstatus.
+De installatie moet:
+
+- automatisch starten na aanmelden van de kioskgebruiker;
+- Raspberry Pi OS Trixie 64-bit met Wayland/labwc gebruiken;
+- Chromium openen via `/usr/bin/chromium`;
+- de presentatie in kioskmodus tonen;
+- regelmatig terug navigeren naar de basis-URL van de Google Slides-presentatie;
+- verborgen of gewijzigde dia's correct verwerken;
+- RAM- en swapgebruik compact loggen;
+- zonder F5, Ctrl+R, Ctrl+L of gesimuleerde toetsen blijven werken;
+- veilig opnieuw geinstalleerd of bijgewerkt kunnen worden.
+
+## Referentieomgeving
+
+De huidige referentieomgeving is:
+
+- Raspberry Pi 3B+ of Raspberry Pi 4;
+- Raspberry Pi OS 64-bit Trixie met Desktop;
+- Wayland;
+- labwc als compositor;
+- LightDM;
+- NetworkManager;
+- systemd-user-services;
+- Bash;
+- Python 3;
+- Chromium via `/usr/bin/chromium`.
+
+Andere Raspberry Pi-modellen kunnen werken, maar moeten apart getest worden.
+
+## Technische Beslissingen
+
+### Wayland En labwc
+
+Raspberry Pi OS Trixie gebruikt standaard Wayland/labwc. Daarom gebruikt de kiosk geen oude X11-aanpak.
+
+Niet gebruiken in uitvoerende scripts:
+
+```text
+DISPLAY=:0
+export DISPLAY
+xdotool
+chromium-browser
+```
+
+### Chromium
+
+Chromium wordt gestart met onder andere:
+
+```text
+--ozone-platform=wayland
+--disable-gpu
+--password-store=basic
+--kiosk
+--no-first-run
+--disable-session-crashed-bubble
+--remote-debugging-address=127.0.0.1
+--remote-debugging-port=9222
+```
+
+De debugpoort is alleen lokaal bereikbaar op `127.0.0.1`.
+
+### Google Slides Refresh
+
+Een gewone refresh met F5 of Ctrl+R is onvoldoende. Google Slides voegt tijdens het afspelen vaak `&slide=id...` toe aan de URL.
+
+Daarom gebruikt het project Chrome DevTools Protocol:
+
+1. Chromium luistert lokaal op poort `9222`.
+2. `refresh-presentation.py` vraagt de actieve targets op via `/json`.
+3. Het script zoekt het Google Slides-tabblad.
+4. Het stuurt `Page.navigate` naar exact `PRESENTATION_URL`.
+
+### systemd User-Services
+
+De kiosk draait als gewone kioskgebruiker, niet als root.
+
+Deze units horen onder `~/.config/systemd/user/`:
+
+```text
+digitalsignage-kiosk.service
+digitalsignage-refresh.service
+digitalsignage-refresh.timer
+digitalsignage-resource-log.service
+digitalsignage-resource-log.timer
+```
+
+Er hoort geen `User=`-regel in deze user-units te staan.
+
+### Statusmap En Logging
+
+De presentatie-refresh en resource-logging zijn gescheiden. De refreshtimer
+navigeert de presentatie standaard iedere 30 seconden terug naar
+`PRESENTATION_URL`. De resource-logtimer schrijft iedere 10 minuten RAM- en
+swapgebruik naar:
+
+```text
+~/.local/state/digitalsignage/swap.log
+```
+
+Logregels ouder dan 3 dagen worden automatisch verwijderd.
+
+De installer en upgrader maken deze map vooraf aan op basis van `KIOSK_USER` en `getent passwd`. Hardcoded homefolders zoals `/home/pi` of `/home/bloemkool` zijn niet toegestaan.
+
+## Testframework
+
+Het project bevat automatische tests:
+
+```text
+tests/test-library.sh
+tests/pre-install-test.sh
+tests/post-install-test.sh
+tests/run-tests.sh
+```
+
+Gebruik:
+
+```bash
+sudo bash tests/run-tests.sh pre
+sudo bash install/install.sh
+sudo bash tests/run-tests.sh post
+```
+
+Logs komen terecht in:
+
+```text
+test-logs/
+```
+
+Resultaatcategorieen:
+
+- `OK`: test geslaagd;
+- `WAARSCHUWING`: aandachtspunt;
+- `FOUT`: installatie of werking is niet betrouwbaar;
+- `OVERGESLAGEN`: test kon niet zinvol uitgevoerd worden.
+
+## Acceptatiecriteria
+
+Een installatie is pas klaar voor gebruik wanneer:
+
+- de pre-installatietest zonder fouten eindigt;
+- de installer zonder fouten eindigt;
+- de post-installatietest zonder fouten eindigt;
+- een volledige reboot succesvol getest is;
+- Chromium automatisch opent;
+- de presentatie correct geladen wordt;
+- refresh via DevTools werkt;
+- `swap.log` iedere 10 minuten wordt bijgewerkt;
+- geen geheimen in Git staan;
+- geen hardcoded homefolder gebruikt wordt.

@@ -38,9 +38,9 @@ Status bekijken:
 systemctl --user status digitalsignage-kiosk.service
 ```
 
-## Refresh Timer
+## Refresh Timer En Resource-Logtimer
 
-De Google Slides-refresh gebruikt een systemd user-timer voor de kioskgebruiker. De unitbestanden worden geinstalleerd onder:
+De Google Slides-refresh gebruikt een systemd user-timer voor de kioskgebruiker. RAM- en swaplogging gebruikt een aparte user-timer, zodat de presentatie vaak kan vernieuwen zonder iedere refresh een logregel te schrijven. De unitbestanden worden geinstalleerd onder:
 
 ```bash
 ~/.config/systemd/user/
@@ -54,16 +54,24 @@ Als kioskgebruiker:
 systemctl --user daemon-reload
 systemctl --user enable --now digitalsignage-kiosk.service
 systemctl --user enable --now digitalsignage-refresh.timer
+systemctl --user enable --now digitalsignage-resource-log.timer
 ```
 
 Status bekijken:
 
 ```bash
 systemctl --user status digitalsignage-refresh.timer
+systemctl --user status digitalsignage-resource-log.timer
 ```
 
 Handmatig een refresh uitvoeren:
 
 ```bash
 systemctl --user start digitalsignage-refresh.service
+```
+
+Handmatig een RAM- en swaplogregel schrijven:
+
+```bash
+systemctl --user start digitalsignage-resource-log.service
 ```
