@@ -15,3 +15,4 @@ Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 - Chromium-profiel en cache gescheiden en cachebegrenzing via `CACHE_SIZE_MB` toegevoegd.
 - Oude refreshscript omgezet naar compatibiliteitswrapper voor `refresh-presentation.py`.
 - Ontbrekende gebruikersstatusmap voor `swap.log` opgelost, inclusief de systemd-fout `226/NAMESPACE`.
+- Geautomatiseerd pre- en post-installatietestframework toegevoegd met logging onder `test-logs/`.

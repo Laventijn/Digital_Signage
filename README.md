@@ -60,3 +60,19 @@ tail -f ~/.local/state/digitalsignage/swap.log
 ## Documentatie
 
 Begin met [docs/01-projectoverzicht.md](docs/01-projectoverzicht.md).
+
+## Automatische installatietesten
+
+Voer voor en na installatie deze controles uit:
+
+```bash
+sudo bash tests/run-tests.sh pre
+sudo bash install/install.sh
+sudo bash tests/run-tests.sh post
+```
+
+De testlogs worden opgeslagen onder:
+
+```bash
+test-logs/
+```

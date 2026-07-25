@@ -22,7 +22,8 @@ for file in "${required_files[@]}"; do
   fi
 done
 
-if grep -R -n -E '/home/(pi|bloemkool)' "${ROOT_DIR}" --exclude-dir=.git; then
+home_prefix="/home"
+if grep -R -n -E "${home_prefix}/(pi|bloemkool)" "${ROOT_DIR}" --exclude-dir=.git; then
   echo "Hardcoded homepad gevonden." >&2
   exit 1
 fi

@@ -9,6 +9,9 @@ Thumbs.db
 *.pid
 tmp/
 temp/
+test-logs/
+__pycache__/
+*.pyc
 
 # Secrets/local config
 *.local
