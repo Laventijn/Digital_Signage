@@ -14,3 +14,4 @@ Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 - Kioskstart gecorrigeerd naar Wayland/labwc met `/usr/bin/chromium` als systemd user-service.
 - Chromium-profiel en cache gescheiden en cachebegrenzing via `CACHE_SIZE_MB` toegevoegd.
 - Oude refreshscript omgezet naar compatibiliteitswrapper voor `refresh-presentation.py`.
+- Ontbrekende gebruikersstatusmap voor `swap.log` opgelost, inclusief de systemd-fout `226/NAMESPACE`.

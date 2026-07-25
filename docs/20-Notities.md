@@ -1,0 +1,1 @@
+FMG-PI03 de SSD van 15 is maar 22mb/sec

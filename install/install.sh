@@ -39,8 +39,10 @@ load_config() {
 }
 
 install_user_units() {
-  local passwd_entry user_home user_uid user_runtime user_bus user_unit_dir
+  local passwd_entry user_home user_uid user_gid user_group user_runtime user_bus user_unit_dir user_state_dir
 
+  # Bepaal de kiosk-homefolder en primaire groep uit de systeemaccountdatabase.
+  # Zo wordt geen enkele homefolder of UID/GID hardcoded.
   passwd_entry="$(getent passwd "${KIOSK_USER}" || true)"
   if [ -z "${passwd_entry}" ]; then
     echo "Kioskgebruiker '${KIOSK_USER}' bestaat niet. Maak de gebruiker aan of pas KIOSK_USER aan." >&2
@@ -48,6 +50,12 @@ install_user_units() {
   fi
   user_home="$(printf '%s' "${passwd_entry}" | cut -d: -f6)"
   user_uid="$(printf '%s' "${passwd_entry}" | cut -d: -f3)"
+  user_gid="$(printf '%s' "${passwd_entry}" | cut -d: -f4)"
+  user_group="$(getent group "${user_gid}" | cut -d: -f1 || true)"
+  if [ -z "${user_group}" ]; then
+    echo "Primaire groep voor kioskgebruiker '${KIOSK_USER}' niet gevonden." >&2
+    exit 1
+  fi
 
   user_unit_dir="${user_home}/.config/systemd/user"
   mkdir -p "${user_unit_dir}"
@@ -55,6 +63,12 @@ install_user_units() {
   cp "${PROJECT_ROOT}/services/digitalsignage-refresh.service" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-refresh.timer" "${user_unit_dir}/"
   chown -R "${KIOSK_USER}:${KIOSK_USER}" "${user_home}/.config"
+
+  # Maak de gebruikersstatusmap voordat user-services starten. De refreshservice
+  # gebruikt deze map voor swap.log; zonder bestaande map kan systemd sandboxing
+  # falen met status=226/NAMESPACE.
+  user_state_dir="${user_home}/.local/state/digitalsignage"
+  install -d -m 0755 -o "${KIOSK_USER}" -g "${user_group}" "${user_state_dir}"
 
   user_runtime="/run/user/${user_uid}"
   user_bus="${user_runtime}/bus"
@@ -75,6 +89,7 @@ require_root
 require_command cp
 require_command chmod
 require_command getent
+require_command install
 require_command mkdir
 require_command runuser
 require_command systemctl

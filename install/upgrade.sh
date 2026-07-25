@@ -35,14 +35,27 @@ passwd_entry="$(getent passwd "${KIOSK_USER}" || true)"
 if [ -z "${passwd_entry}" ]; then
   echo "Kioskgebruiker '${KIOSK_USER}' bestaat niet. User-units zijn niet bijgewerkt." >&2
 else
+  # Bepaal de kiosk-homefolder en primaire groep uit de systeemaccountdatabase.
+  # Zo herstelt een upgrade ook oudere installaties zonder hardcoded homepad.
   user_home="$(printf '%s' "${passwd_entry}" | cut -d: -f6)"
   user_uid="$(printf '%s' "${passwd_entry}" | cut -d: -f3)"
+  user_gid="$(printf '%s' "${passwd_entry}" | cut -d: -f4)"
+  user_group="$(getent group "${user_gid}" | cut -d: -f1 || true)"
+  if [ -z "${user_group}" ]; then
+    echo "Primaire groep voor kioskgebruiker '${KIOSK_USER}' niet gevonden. User-units zijn niet bijgewerkt." >&2
+    exit 1
+  fi
   user_unit_dir="${user_home}/.config/systemd/user"
   mkdir -p "${user_unit_dir}"
   cp "${PROJECT_ROOT}/services/digitalsignage-kiosk.service" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-refresh.service" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-refresh.timer" "${user_unit_dir}/"
   chown -R "${KIOSK_USER}:${KIOSK_USER}" "${user_home}/.config"
+
+  # Maak de gebruikersstatusmap voordat user-services opnieuw geladen of gestart
+  # worden. Dit voorkomt status=226/NAMESPACE bij de refreshservice.
+  user_state_dir="${user_home}/.local/state/digitalsignage"
+  install -d -m 0755 -o "${KIOSK_USER}" -g "${user_group}" "${user_state_dir}"
 
   user_runtime="/run/user/${user_uid}"
   user_bus="${user_runtime}/bus"
