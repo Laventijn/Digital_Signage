@@ -1,0 +1,6 @@
+[Unit]
+Description=Digital Signage Health Check
+
+[Service]
+Type=oneshot
+ExecStart=/opt/digitalsignage/scripts/health-check.sh

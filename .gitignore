@@ -1,0 +1,19 @@
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs and runtime
+*.log
+*.pid
+tmp/
+temp/
+
+# Secrets/local config
+*.local
+*.secret
+digitalsignage.conf
+
+# Shell test output
+coverage/

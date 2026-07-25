@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Digital Signage Health Check periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=digitalsignage-healthcheck.service
+
+[Install]
+WantedBy=timers.target

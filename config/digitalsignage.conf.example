@@ -1,0 +1,9 @@
+# Digital Signage configuration
+
+SIGNAGE_URL="https://example.org"
+OFFLINE_URL="file:///opt/digitalsignage/web/offline/index.html"
+CHROMIUM_BIN="chromium-browser"
+DISPLAY_ID=":0"
+NETWORK_CHECK_HOST="1.1.1.1"
+NETWORK_CHECK_TIMEOUT="3"
+KIOSK_REFRESH_SECONDS="3600"

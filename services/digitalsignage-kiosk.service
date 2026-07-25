@@ -1,0 +1,15 @@
+[Unit]
+Description=Digital Signage Kiosk
+After=network-online.target graphical.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Environment=CONFIG_FILE=/etc/digitalsignage/digitalsignage.conf
+ExecStart=/opt/digitalsignage/scripts/start-kiosk.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=graphical.target
