@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
+User=bloemkool
 Environment=CONFIG_FILE=/etc/digitalsignage/digitalsignage.conf
 ExecStart=/opt/digitalsignage/scripts/start-kiosk.sh
 Restart=always

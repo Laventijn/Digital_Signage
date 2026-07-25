@@ -8,14 +8,14 @@ if [ -f "${CONFIG_FILE}" ]; then
   source "${CONFIG_FILE}"
 fi
 
-SIGNAGE_URL="${SIGNAGE_URL:-https://example.org}"
+PRESENTATION_URL="${PRESENTATION_URL:-https://example.org}"
 OFFLINE_URL="${OFFLINE_URL:-file:///opt/digitalsignage/web/offline/index.html}"
 CHROMIUM_BIN="${CHROMIUM_BIN:-chromium-browser}"
 DISPLAY_ID="${DISPLAY_ID:-:0}"
 
 export DISPLAY="${DISPLAY_ID}"
 
-URL="${SIGNAGE_URL}"
+URL="${PRESENTATION_URL}"
 if ! /opt/digitalsignage/scripts/check-network.sh >/dev/null 2>&1; then
   URL="${OFFLINE_URL}"
 fi
