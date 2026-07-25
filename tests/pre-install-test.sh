@@ -8,6 +8,27 @@ source "${SCRIPT_DIR}/test-library.sh"
 
 init_test_context "pre-install"
 
+is_expected_preinstall_opt_warning() {
+  local output="$1"
+  local line saw_execstart_warning=0
+  while IFS= read -r line; do
+    [ -z "${line}" ] && continue
+    case "${line}" in
+      *.service:|*.timer:)
+        ;;
+      "Command /opt/digitalsignage/"*" is not executable: No such file or directory")
+        saw_execstart_warning=1
+        ;;
+      *)
+        return 1
+        ;;
+    esac
+  done <<EOF
+${output}
+EOF
+  [ "${saw_execstart_warning}" -eq 1 ]
+}
+
 test_system() {
   local failed=0
   if [ -f /etc/os-release ]; then
@@ -101,6 +122,8 @@ test_repository() {
     "services/digitalsignage-resource-log.service"
     "services/digitalsignage-resource-log.timer"
     "config/digitalsignage.conf.example"
+    "tests/test-upgrade-config-merge.sh"
+    "tests/test-resource-log-retention.py"
   )
 
   for file in "${required_files[@]}"; do
@@ -112,7 +135,7 @@ test_repository() {
     fi
   done
 
-  for file in install/install.sh install/upgrade.sh install/uninstall.sh scripts/start-kiosk.sh scripts/refresh-kiosk.sh scripts/restart-chromium.sh scripts/health-check.sh; do
+  for file in install/install.sh install/upgrade.sh install/uninstall.sh scripts/start-kiosk.sh scripts/refresh-kiosk.sh scripts/restart-chromium.sh scripts/health-check.sh scripts/refresh-presentation.py scripts/log-resources.py; do
     if [ -x "${TEST_ROOT_DIR}/${file}" ]; then
       log_ok "Uitvoerbaar: ${file}"
     else
@@ -156,7 +179,7 @@ test_python_syntax() {
   local cache_dir="${TEST_ROOT_DIR}/scripts/__pycache__"
   local before_marker after_marker
   before_marker="$(find "${cache_dir}" -type f \( -name 'refresh-presentation*.pyc' -o -name 'log-resources*.pyc' \) -print 2>/dev/null || true)"
-  if python3 -m py_compile "${TEST_ROOT_DIR}/scripts/refresh-presentation.py" "${TEST_ROOT_DIR}/scripts/log-resources.py"; then
+  if python3 -m py_compile "${TEST_ROOT_DIR}/scripts/refresh-presentation.py" "${TEST_ROOT_DIR}/scripts/log-resources.py" "${TEST_ROOT_DIR}/tests/test-resource-log-retention.py"; then
     log_ok "Python-syntaxis is geldig"
   else
     log_error "Python-syntaxiscontrole faalt"
@@ -182,7 +205,7 @@ test_systemd_units() {
     fi
     if [ "${status}" -eq 0 ]; then
       log_ok "systemd-analyze verify: ${unit}"
-    elif printf '%s\n' "${output}" | grep -q '/opt/digitalsignage'; then
+    elif is_expected_preinstall_opt_warning "${output}"; then
       log_warning "Verwachte pre-install melding voor ${unit}: /opt/digitalsignage bestaat mogelijk nog niet"
     else
       log_error "systemd-analyze verify faalt: ${unit}"
@@ -190,6 +213,81 @@ test_systemd_units() {
     fi
   done
   return "${failed}"
+}
+
+test_runner_sudo_handling() {
+  local runner="${TEST_ROOT_DIR}/tests/run-tests.sh"
+  local failed=0
+  [ "$(id -u)" -ne 0 ] && log_ok "Pre-installatietest draait zonder rootrechten" || { log_error "Pre-installatietest draait als root"; failed=1; }
+  grep -q 'SUDO_USER' "${runner}" && log_ok "run-tests.sh controleert SUDO_USER" || { log_error "SUDO_USER-controle ontbreekt"; failed=1; }
+  grep -q 'DIGITALSIGNAGE_PRE_REEXEC' "${runner}" && log_ok "run-tests.sh voorkomt een herstartlus" || { log_error "Herstartlusbescherming ontbreekt"; failed=1; }
+  grep -q 'user_runtime="/run/user/${original_uid}"' "${runner}" &&
+    grep -q 'XDG_RUNTIME_DIR="${user_runtime}"' "${runner}" &&
+    log_ok "run-tests.sh bepaalt XDG_RUNTIME_DIR uit UID" || { log_error "XDG_RUNTIME_DIR-bepaling ontbreekt"; failed=1; }
+  grep -q 'DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}"' "${runner}" && log_ok "run-tests.sh zet user D-Bus-adres" || { log_error "D-Bus-adres ontbreekt"; failed=1; }
+  grep -q 'runuser -u "${original_user}"' "${runner}" && log_ok "run-tests.sh schakelt terug naar SUDO_USER" || { log_error "Terugschakelen naar SUDO_USER ontbreekt"; failed=1; }
+  return "${failed}"
+}
+
+test_systemd_warning_classification() {
+  local expected_output bad_manager bad_syntax failed=0
+  expected_output=$'digitalsignage-resource-log.service:\nCommand /opt/digitalsignage/scripts/log-resources.py is not executable: No such file or directory'
+  bad_manager="Failed to initialize manager: No such device or address"
+  bad_syntax="Unknown key name 'BogusDirective' in section 'Service', ignoring."
+
+  if is_expected_preinstall_opt_warning "${expected_output}"; then
+    log_ok "Ontbrekend /opt ExecStart-bestand wordt waarschuwing"
+  else
+    log_error "Ontbrekend /opt ExecStart-bestand wordt niet als waarschuwing herkend"
+    failed=1
+  fi
+
+  if is_expected_preinstall_opt_warning "${bad_manager}"; then
+    log_error "Failed to initialize manager wordt ten onrechte waarschuwing"
+    failed=1
+  else
+    log_ok "Failed to initialize manager blijft een fout"
+  fi
+
+  if is_expected_preinstall_opt_warning "${bad_syntax}"; then
+    log_error "Systemd-syntaxfout wordt ten onrechte waarschuwing"
+    failed=1
+  else
+    log_ok "Systemd-syntaxfout blijft een fout"
+  fi
+
+  return "${failed}"
+}
+
+test_installer_executable_modes() {
+  local failed=0
+  for file in install/install.sh install/upgrade.sh; do
+    if grep -q 'install -m 0755 .*scripts' "${TEST_ROOT_DIR}/${file}"; then
+      log_ok "${file} installeert scripts met modus 0755"
+    else
+      log_error "${file} installeert scripts niet aantoonbaar met modus 0755"
+      failed=1
+    fi
+  done
+  return "${failed}"
+}
+
+test_upgrade_config_merge() {
+  if bash "${TEST_ROOT_DIR}/tests/test-upgrade-config-merge.sh"; then
+    log_ok "Upgradeconfiguratie vult ontbrekende variabelen idempotent aan"
+  else
+    log_error "Upgradeconfiguratie-merge faalt"
+    return 1
+  fi
+}
+
+test_resource_log_retention() {
+  if python3 "${TEST_ROOT_DIR}/tests/test-resource-log-retention.py"; then
+    log_ok "Resource-logretentie bewaart recente historische regels en verwijdert oude regels"
+  else
+    log_error "Resource-logretentietest faalt"
+    return 1
+  fi
 }
 
 test_forbidden_patterns() {
@@ -276,9 +374,14 @@ test_state_directory_fix() {
 run_test "Systeem" test_system
 run_test "Benodigde commando's" test_commands
 run_test "Repository" test_repository
+run_test "Pre-test zonder sudo" test_runner_sudo_handling
 run_test "Bash-syntaxis" test_bash_syntax
 run_test "Python-syntaxis" test_python_syntax
+run_test "Systemd-waarschuwingsclassificatie" test_systemd_warning_classification
 run_test "systemd-units" test_systemd_units
+run_test "Uitvoerrechten installatie" test_installer_executable_modes
+run_test "Upgradeconfiguratie-merge" test_upgrade_config_merge
+run_test "Resource-logretentie" test_resource_log_retention
 run_test "Verboden patronen" test_forbidden_patterns
 run_test "Configuratie" test_config
 run_test "Statusmap-oplossing" test_state_directory_fix

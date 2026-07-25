@@ -123,10 +123,13 @@ tests/run-tests.sh
 Gebruik:
 
 ```bash
-sudo bash tests/run-tests.sh pre
+bash tests/run-tests.sh pre
 sudo bash install/install.sh
 sudo bash tests/run-tests.sh post
 ```
+
+De pre-installatietest draait zonder `sudo`, zodat `systemd-analyze --user`
+de user-units in de echte gebruikersomgeving controleert.
 
 Logs komen terecht in:
 

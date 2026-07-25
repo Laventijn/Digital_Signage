@@ -38,6 +38,15 @@ load_config() {
   fi
 }
 
+install_project_files() {
+  local script_file
+  install -d -m 0755 "${INSTALL_DIR}/scripts"
+  while IFS= read -r -d '' script_file; do
+    install -m 0755 "${script_file}" "${INSTALL_DIR}/scripts/$(basename "${script_file}")"
+  done < <(find "${PROJECT_ROOT}/scripts" -maxdepth 1 -type f -print0)
+  cp -R "${PROJECT_ROOT}/web" "${INSTALL_DIR}/"
+}
+
 install_user_units() {
   local passwd_entry user_home user_uid user_gid user_group user_runtime user_bus user_unit_dir user_state_dir
 
@@ -91,7 +100,7 @@ install_user_units() {
 
 require_root
 require_command cp
-require_command chmod
+require_command find
 require_command getent
 require_command install
 require_command mkdir
@@ -100,8 +109,7 @@ require_command systemctl
 install_packages
 
 mkdir -p "${INSTALL_DIR}" "${CONFIG_DIR}"
-cp -R "${PROJECT_ROOT}/scripts" "${INSTALL_DIR}/"
-cp -R "${PROJECT_ROOT}/web" "${INSTALL_DIR}/"
+install_project_files
 
 if [ ! -f "${CONFIG_FILE}" ]; then
   cp "${PROJECT_ROOT}/config/digitalsignage.conf.example" "${CONFIG_FILE}"
@@ -110,9 +118,6 @@ fi
 load_config
 cp "${PROJECT_ROOT}/services/digitalsignage-healthcheck.service" "${SERVICE_DIR}/"
 cp "${PROJECT_ROOT}/services/digitalsignage-healthcheck.timer" "${SERVICE_DIR}/"
-chmod +x "${INSTALL_DIR}/scripts/"*.sh
-chmod +x "${INSTALL_DIR}/scripts/refresh-presentation.py"
-chmod +x "${INSTALL_DIR}/scripts/log-resources.py"
 install_user_units
 
 systemctl daemon-reload

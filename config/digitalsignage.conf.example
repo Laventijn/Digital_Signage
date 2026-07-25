@@ -1,7 +1,7 @@
 # Digital Signage configuratievoorbeeld
 # Plaats hier geen wachtwoorden, Wi-Fi-sleutels, tokens of andere geheimen.
 
-PRESENTATION_URL="https://docs.google.com/presentation/d/1cUJkZT8T8xVz6g9N_PrCgHIF7wcKQy1bIRtCutK9z5E/present?start=true&loop=false&delayms=5000"
+PRESENTATION_URL="https://docs.google.com/presentation/d/1cUJkZT8T8xVz6g9N_PrCgHIF7wcKQy1bIRtCutK9z5E/present?start=true&loop=true&delayms=5000"
 OFFLINE_URL="file:///opt/digitalsignage/web/offline/index.html"
 CHROMIUM_BIN="/usr/bin/chromium"
 WAYLAND_DISPLAY="wayland-0"

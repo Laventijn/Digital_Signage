@@ -71,10 +71,13 @@ Begin met [docs/01-projectoverzicht.md](docs/01-projectoverzicht.md).
 Voer voor en na installatie deze controles uit:
 
 ```bash
-sudo bash tests/run-tests.sh pre
+bash tests/run-tests.sh pre
 sudo bash install/install.sh
 sudo bash tests/run-tests.sh post
 ```
+
+De pre-installatietest draait bewust zonder `sudo`, omdat die de
+systemd-user-units in de gebruikersomgeving moet verifieren.
 
 De testlogs worden opgeslagen onder:
 

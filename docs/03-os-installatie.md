@@ -96,7 +96,7 @@ web/
 Voer uit vanuit de repository-root:
 
 ```bash
-sudo bash tests/run-tests.sh pre
+bash tests/run-tests.sh pre
 ```
 
 De test controleert onder andere:
@@ -111,6 +111,10 @@ De test controleert onder andere:
 - statusmapoplossing.
 
 Installeer niet wanneer de test met fouten eindigt. Waarschuwingen moeten beoordeeld worden.
+Gebruik voor deze pre-installatietest geen `sudo`: de test controleert
+systemd-user-units in de gebruikersomgeving. Wanneer de test toch met `sudo`
+wordt gestart, schakelt `tests/run-tests.sh` terug naar de oorspronkelijke
+gebruiker uit `SUDO_USER`.
 
 ## 6. Installatie Uitvoeren
 
@@ -150,7 +154,7 @@ sudo nano /etc/digitalsignage/digitalsignage.conf
 Controleer minimaal:
 
 ```ini
-PRESENTATION_URL="https://docs.google.com/presentation/.../present?start=true&loop=false&delayms=5000"
+PRESENTATION_URL="https://docs.google.com/presentation/.../present?start=true&loop=true&delayms=5000"
 CHROMIUM_BIN="/usr/bin/chromium"
 WAYLAND_DISPLAY="wayland-0"
 REMOTE_DEBUG_HOST="127.0.0.1"

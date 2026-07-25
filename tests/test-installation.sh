@@ -15,6 +15,8 @@ required_files=(
   "services/digitalsignage-refresh.timer"
   "services/digitalsignage-resource-log.service"
   "services/digitalsignage-resource-log.timer"
+  "tests/test-upgrade-config-merge.sh"
+  "tests/test-resource-log-retention.py"
   "web/offline/index.html"
 )
 

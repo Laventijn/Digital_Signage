@@ -3,8 +3,13 @@
 Update de installatie met:
 
 ```bash
+bash tests/run-tests.sh pre
 sudo bash install/upgrade.sh
+sudo bash tests/run-tests.sh post
 ```
+
+De pre-installatietest draait zonder `sudo`, omdat de systemd-user-units in de
+gebruikersomgeving gecontroleerd worden.
 
 Herstart daarna de kioskservice als kioskgebruiker:
 

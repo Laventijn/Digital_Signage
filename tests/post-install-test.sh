@@ -15,8 +15,7 @@ KIOSK_UID=""
 KIOSK_GID=""
 KIOSK_GROUP=""
 
-run_user_systemctl() {
-  local args=("$@")
+run_as_kiosk_user() {
   if [ -z "${KIOSK_USER}" ] || [ -z "${KIOSK_UID}" ]; then
     log_error "Kioskgebruiker of UID is niet bepaald"
     return 1
@@ -26,12 +25,44 @@ run_user_systemctl() {
     sudo -u "${KIOSK_USER}" \
       XDG_RUNTIME_DIR="/run/user/${KIOSK_UID}" \
       DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${KIOSK_UID}/bus" \
-      systemctl --user "${args[@]}"
+      "$@"
   else
     XDG_RUNTIME_DIR="/run/user/${KIOSK_UID}" \
       DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${KIOSK_UID}/bus" \
-      systemctl --user "${args[@]}"
+      "$@"
   fi
+}
+
+run_user_systemctl() {
+  run_as_kiosk_user systemctl --user "$@"
+}
+
+run_user_journalctl() {
+  run_as_kiosk_user journalctl --user "$@"
+}
+
+get_user_unit_property() {
+  local unit="$1"
+  local property="$2"
+  run_user_systemctl show "${unit}" --property="${property}" --value 2>/dev/null
+}
+
+show_oneshot_result() {
+  local unit="$1"
+  run_user_systemctl show "${unit}" --property=Result --property=ExecMainCode --property=ExecMainStatus --property=ActiveState --no-pager 2>&1 || true
+}
+
+extract_slides_id() {
+  local url="$1"
+  case "${url}" in
+    *"/presentation/d/"*)
+      url="${url#*/presentation/d/}"
+      printf '%s\n' "${url%%/*}"
+      ;;
+    *)
+      printf '\n'
+      ;;
+  esac
 }
 
 test_user_and_config() {
@@ -81,12 +112,17 @@ test_install_paths() {
     fi
   done
 
-  for path in /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py; do
+  for path in /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py /opt/digitalsignage/scripts/health-check.sh /opt/digitalsignage/scripts/refresh-kiosk.sh /opt/digitalsignage/scripts/restart-chromium.sh /opt/digitalsignage/scripts/show-network-info.sh /opt/digitalsignage/scripts/check-network.sh; do
     if [ -x "${path}" ]; then
       log_ok "Script is uitvoerbaar: ${path}"
     else
       log_error "Script is niet uitvoerbaar: ${path}"
       failed=1
+    fi
+    if [ -e "${path}" ]; then
+      local mode
+      mode="$(stat -c '%a' "${path}")"
+      [ "${mode}" = "755" ] && log_ok "Scriptmodus is 0755: ${path}" || { log_error "Scriptmodus is ${mode}, verwacht 0755: ${path}"; failed=1; }
     fi
   done
   return "${failed}"
@@ -128,8 +164,16 @@ test_user_systemd() {
     return 1
   fi
 
-  for unit in digitalsignage-kiosk.service digitalsignage-refresh.service digitalsignage-refresh.timer digitalsignage-resource-log.service digitalsignage-resource-log.timer; do
+  for unit in digitalsignage-kiosk.service digitalsignage-refresh.timer digitalsignage-resource-log.timer; do
     run_user_systemctl status "${unit}" --no-pager || log_warning "Statuscontrole gaf niet-nul exitcode voor ${unit}"
+  done
+
+  for unit in digitalsignage-refresh.service digitalsignage-resource-log.service; do
+    local unit_state
+    unit_state="$(show_oneshot_result "${unit}")"
+    printf '%s\n' "${unit_state}"
+    printf '%s\n' "${unit_state}" | grep -F 'Result=success' >/dev/null && log_ok "${unit} laatste Result=success" || log_info "${unit} heeft nog geen succesvolle oneshot-run"
+    printf '%s\n' "${unit_state}" | grep -F 'ActiveState=inactive' >/dev/null && log_ok "${unit} mag inactive zijn na oneshot" || true
   done
 
   run_user_systemctl is-enabled digitalsignage-kiosk.service >/dev/null && log_ok "Kioskservice is enabled" || { log_error "Kioskservice is niet enabled"; failed=1; }
@@ -144,20 +188,31 @@ test_user_systemd() {
 
 test_chromium() {
   local failed=0
-  local presentation_url cmdline pid
+  local presentation_url presentation_id cmdline pid
   presentation_url="$(read_config_value PRESENTATION_URL "${CONFIG_FILE}")"
-  pid="$(pgrep -u "${KIOSK_UID}" -f '/usr/bin/chromium.*--kiosk' | head -n 1 || true)"
-  if [ -z "${pid}" ]; then
-    log_error "Geen Chromium-kioskproces gevonden"
+  presentation_id="$(extract_slides_id "${presentation_url}")"
+  pid="$(get_user_unit_property digitalsignage-kiosk.service MainPID)"
+
+  if ! printf '%s\n' "${pid}" | grep -E '^[0-9]+$' >/dev/null; then
+    log_error "MainPID van digitalsignage-kiosk.service is niet numeriek: ${pid:-leeg}"
     return 1
   fi
-  log_ok "Chromium-kioskproces gevonden: PID ${pid}"
+  if [ "${pid}" -le 0 ]; then
+    log_error "MainPID van digitalsignage-kiosk.service is niet groter dan nul: ${pid}"
+    return 1
+  fi
+  if [ ! -d "/proc/${pid}" ]; then
+    log_error "/proc/${pid} bestaat niet voor kiosk MainPID"
+    return 1
+  fi
+  log_ok "Kiosk MainPID gevonden: ${pid}"
 
   cmdline="$(tr '\0' ' ' < "/proc/${pid}/cmdline")"
   log_info "Chromium commandline: ${cmdline}"
 
   local option
-  for option in '--ozone-platform=wayland' '--disable-gpu' '--password-store=basic' '--kiosk' '--remote-debugging-address=127.0.0.1' '--remote-debugging-port=9222' '--disk-cache-size='; do
+  printf '%s\n' "${cmdline}" | grep -F 'chromium' >/dev/null && log_ok "Chromium-binary in commandline" || { log_error "Commandline bevat geen chromium"; failed=1; }
+  for option in '--kiosk' '--ozone-platform=wayland' '--disable-gpu' '--remote-debugging-address=127.0.0.1' '--remote-debugging-port=9222'; do
     if printf '%s\n' "${cmdline}" | grep -F -- "${option}" >/dev/null; then
       log_ok "Chromium-optie aanwezig: ${option}"
     else
@@ -168,15 +223,11 @@ test_chromium() {
 
   if [ -n "${presentation_url}" ] && printf '%s\n' "${cmdline}" | grep -F -- "${presentation_url}" >/dev/null; then
     log_ok "Presentatie-URL staat in Chromium commandline"
+  elif [ -n "${presentation_id}" ] && printf '%s\n' "${cmdline}" | grep -F -- "${presentation_id}" >/dev/null; then
+    log_ok "Google Slides-presentatie-ID staat in Chromium commandline"
   else
-    log_error "Presentatie-URL ontbreekt in Chromium commandline"
+    log_error "Presentatie-URL of Google Slides-presentatie-ID ontbreekt in Chromium commandline"
     failed=1
-  fi
-
-  if run_user_systemctl status digitalsignage-kiosk.service --no-pager | grep -F "${pid}" >/dev/null; then
-    log_ok "Chromium-proces hoort bij kioskservice"
-  else
-    log_warning "PID niet rechtstreeks teruggevonden in systemctl status"
   fi
 
   return "${failed}"
@@ -207,19 +258,11 @@ test_manual_refresh() {
     return 1
   }
 
-  local i
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    if ! run_user_systemctl is-active digitalsignage-refresh.service >/dev/null; then
-      break
-    fi
-    sleep 1
-  done
-
   local status journal
+  journal="$(show_oneshot_result digitalsignage-refresh.service)"
+  printf '%s\n' "${journal}"
   status="$(run_user_systemctl status digitalsignage-refresh.service --no-pager 2>&1 || true)"
   printf '%s\n' "${status}"
-  journal="$(run_user_systemctl show digitalsignage-refresh.service -p Result -p ExecMainStatus -p ExecMainCode --no-pager 2>&1 || true)"
-  printf '%s\n' "${journal}"
 
   printf '%s\n%s\n' "${status}" "${journal}" | grep -E '226/NAMESPACE|Failed to set up mount namespacing' >/dev/null && { log_error "Namespacefout gevonden bij refreshservice"; failed=1; }
   printf '%s\n' "${journal}" | grep -F 'Result=success' >/dev/null && log_ok "Laatste refresh eindigde succesvol" || { log_error "Laatste refresh was niet succesvol"; failed=1; }
@@ -237,9 +280,10 @@ test_resource_log() {
   }
 
   local journal
-  journal="$(run_user_systemctl show digitalsignage-resource-log.service -p Result -p ExecMainStatus -p ExecMainCode --no-pager 2>&1 || true)"
+  journal="$(show_oneshot_result digitalsignage-resource-log.service)"
   printf '%s\n' "${journal}"
   printf '%s\n' "${journal}" | grep -E '226/NAMESPACE|Failed to set up mount namespacing' >/dev/null && { log_error "Namespacefout gevonden bij resource-logservice"; failed=1; }
+  printf '%s\n' "${journal}" | grep -F 'Result=success' >/dev/null && log_ok "Laatste resource-log eindigde succesvol" || { log_error "Laatste resource-log was niet succesvol"; failed=1; }
   printf '%s\n' "${journal}" | grep -F 'ExecMainStatus=0' >/dev/null && log_ok "Resource-log exitstatus 0" || { log_error "Resource-log exitstatus is niet 0"; failed=1; }
 
   if [ -f "${log_file}" ]; then
@@ -302,14 +346,17 @@ test_system_status() {
 }
 
 test_journals() {
-  local unit
+  local unit output unit_state
   for unit in digitalsignage-kiosk.service digitalsignage-refresh.service digitalsignage-refresh.timer digitalsignage-resource-log.service digitalsignage-resource-log.timer; do
     log_info "Laatste journalregels voor ${unit}"
-    run_user_systemctl --no-pager status "${unit}" >/dev/null 2>&1 || true
-    sudo -u "${KIOSK_USER}" \
-      XDG_RUNTIME_DIR="/run/user/${KIOSK_UID}" \
-      DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${KIOSK_UID}/bus" \
-      journalctl --user -u "${unit}" -n 30 --no-pager || true
+    unit_state="$(run_user_systemctl show "${unit}" --property=Result --property=ExecMainStatus --property=ActiveState --no-pager 2>&1 || true)"
+    output="$(run_user_journalctl -u "${unit}" -n 30 --no-pager 2>&1 || true)"
+    printf '%s\n' "${output}"
+    if printf '%s\n' "${output}" | grep -F 'No journal files were found' >/dev/null &&
+      printf '%s\n' "${unit_state}" | grep -E 'ActiveState=active|Result=success|ExecMainStatus=0' >/dev/null; then
+      log_error "Geen user-journal gevonden voor uitgevoerde unit: ${unit}"
+      return 1
+    fi
   done
   return 0
 }

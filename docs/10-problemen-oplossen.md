@@ -81,3 +81,13 @@ rm -f ~/.local/state/digitalsignage/swap.log ~/.local/state/digitalsignage/swap.
 ```
 
 Logregels ouder dan 3 dagen worden automatisch verwijderd.
+
+## Fontconfig-Waarschuwing
+
+Deze melding is als observatie bekend:
+
+```text
+Fontconfig error: Cannot load default config file: No such file: (null)
+```
+
+Wijzig hiervoor niet direct Chromium-flags, desktop-pakketten of fontconfigbestanden. Onderzoek dit pas verder wanneer de kioskweergave zichtbare problemen met lettertypes toont.

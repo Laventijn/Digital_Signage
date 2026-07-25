@@ -4,6 +4,69 @@ set -Eeuo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_DIR="/opt/digitalsignage"
 CONFIG_FILE="/etc/digitalsignage/digitalsignage.conf"
+CONFIG_DEFAULTS=(
+  "RESOURCE_LOG_RETENTION_DAYS=3"
+)
+
+active_config_has_key() {
+  local key="$1"
+  local file="$2"
+  awk -F= -v key="${key}" '
+    /^[[:space:]]*#/ { next }
+    $1 ~ "^[[:space:]]*" key "[[:space:]]*$" { found=1 }
+    END { exit found ? 0 : 1 }
+  ' "${file}"
+}
+
+read_config_value() {
+  local key="$1"
+  local file="$2"
+  awk -F= -v key="${key}" '
+    /^[[:space:]]*#/ { next }
+    $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
+      value=$0
+      sub(/^[^=]*=/, "", value)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      gsub(/^"|"$/, "", value)
+      gsub(/^'\''|'\''$/, "", value)
+      print value
+      exit
+    }
+  ' "${file}"
+}
+
+append_missing_config_defaults() {
+  local file="$1"
+  local default_entry key backup_file missing=0
+
+  [ -f "${file}" ] || return 0
+
+  for default_entry in "${CONFIG_DEFAULTS[@]}"; do
+    key="${default_entry%%=*}"
+    if ! active_config_has_key "${key}" "${file}"; then
+      missing=1
+    fi
+  done
+
+  [ "${missing}" -eq 1 ] || return 0
+
+  backup_file="${file}.backup.$(date '+%Y%m%d-%H%M%S')"
+  cp -p "${file}" "${backup_file}"
+  echo "Backup gemaakt: ${backup_file}"
+
+  for default_entry in "${CONFIG_DEFAULTS[@]}"; do
+    key="${default_entry%%=*}"
+    if ! active_config_has_key "${key}" "${file}"; then
+      printf '\n%s\n' "${default_entry}" >> "${file}"
+      echo "Configuratievariabele toegevoegd: ${key}"
+    fi
+  done
+}
+
+if [ "${DIGITALSIGNAGE_TEST_CONFIG_MERGE:-}" = "1" ]; then
+  append_missing_config_defaults "${1:?configbestand ontbreekt}"
+  exit 0
+fi
 
 if [ "${EUID}" -ne 0 ]; then
   echo "Voer deze upgrade uit als root." >&2
@@ -11,9 +74,12 @@ if [ "${EUID}" -ne 0 ]; then
 fi
 
 KIOSK_USER="bloemkool"
+append_missing_config_defaults "${CONFIG_FILE}"
 if [ -f "${CONFIG_FILE}" ]; then
-  # shellcheck source=/dev/null
-  source "${CONFIG_FILE}"
+  configured_kiosk_user="$(read_config_value KIOSK_USER "${CONFIG_FILE}")"
+  if [ -n "${configured_kiosk_user}" ]; then
+    KIOSK_USER="${configured_kiosk_user}"
+  fi
 fi
 
 if command -v apt-get >/dev/null 2>&1; then
@@ -23,14 +89,19 @@ else
   echo "Waarschuwing: apt-get niet gevonden; installeer python3 en python3-websocket handmatig." >&2
 fi
 
+install_project_files() {
+  local script_file
+  install -d -m 0755 "${INSTALL_DIR}/scripts"
+  while IFS= read -r -d '' script_file; do
+    install -m 0755 "${script_file}" "${INSTALL_DIR}/scripts/$(basename "${script_file}")"
+  done < <(find "${PROJECT_ROOT}/scripts" -maxdepth 1 -type f -print0)
+  cp -R "${PROJECT_ROOT}/web" "${INSTALL_DIR}/"
+}
+
 mkdir -p "${INSTALL_DIR}"
-cp -R "${PROJECT_ROOT}/scripts" "${INSTALL_DIR}/"
-cp -R "${PROJECT_ROOT}/web" "${INSTALL_DIR}/"
+install_project_files
 cp "${PROJECT_ROOT}/services/digitalsignage-healthcheck.service" /etc/systemd/system/
 cp "${PROJECT_ROOT}/services/digitalsignage-healthcheck.timer" /etc/systemd/system/
-chmod +x "${INSTALL_DIR}/scripts/"*.sh
-chmod +x "${INSTALL_DIR}/scripts/refresh-presentation.py"
-chmod +x "${INSTALL_DIR}/scripts/log-resources.py"
 
 passwd_entry="$(getent passwd "${KIOSK_USER}" || true)"
 if [ -z "${passwd_entry}" ]; then

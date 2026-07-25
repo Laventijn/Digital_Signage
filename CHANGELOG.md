@@ -17,4 +17,7 @@ Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 - Oude refreshscript omgezet naar compatibiliteitswrapper voor `refresh-presentation.py`.
 - Ontbrekende gebruikersstatusmap voor `swap.log` opgelost, inclusief de systemd-fout `226/NAMESPACE`.
 - Geautomatiseerd pre- en post-installatietestframework toegevoegd met logging onder `test-logs/`.
+- Pre-installatietest gecorrigeerd voor systemd-user-verificatie zonder `sudo` en installatie van scripts met modus `0755`.
+- Upgrade vult ontbrekende configuratievariabelen idempotent aan en post-installatietests corrigeren Chromium-, oneshot- en user-journalcontroles.
+- Standaard Google Slides-presentatie-URL aangepast naar `loop=true`.
 - Losse documentatienotities samengevoegd in de genummerde documentatie.

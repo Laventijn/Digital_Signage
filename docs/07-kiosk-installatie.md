@@ -3,8 +3,13 @@
 De kiosk wordt geïnstalleerd met:
 
 ```bash
+bash tests/run-tests.sh pre
 sudo bash install/install.sh
+sudo bash tests/run-tests.sh post
 ```
+
+De pre-installatietest gebruikt geen `sudo`, omdat de systemd-user-units in de
+gebruikersomgeving gecontroleerd moeten worden.
 
 De installer kopieert scripts, webbestanden, configuratie en systemd-units naar de juiste locaties.
 Daarnaast installeert de installer `python3` en `python3-websocket` wanneer `apt-get` beschikbaar is.
