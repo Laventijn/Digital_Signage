@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 if ! /opt/digitalsignage/scripts/check-network.sh >/dev/null 2>&1; then
-  echo "Network check failed." >&2
+  echo "Netwerkcontrole mislukt." >&2
   exit 1
 fi
 
-if ! pgrep -f "chromium.*--kiosk" >/dev/null; then
-  echo "Chromium kiosk process not found; restarting service." >&2
-  systemctl restart digitalsignage-kiosk.service
+if ! pgrep -f "/usr/bin/chromium.*--kiosk" >/dev/null; then
+  echo "Chromium-kioskproces niet gevonden; controleer de user-service digitalsignage-kiosk.service." >&2
+  exit 1
 fi

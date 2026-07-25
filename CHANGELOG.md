@@ -8,3 +8,9 @@ Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 - Basisdocumentatie, scripts, services, configuratievoorbeeld en tests toegevoegd.
 - Configuratienaamgeving genormaliseerd naar `PRESENTATION_URL` en `REFRESH_SECONDS`.
 - Kioskservice-gebruiker aangepast naar `bloemkool`.
+- Permanent Google Slides-refreshmechanisme via Chrome DevTools Protocol toegevoegd.
+- Compacte RAM- en swaplogging toegevoegd voor iedere refreshpoging.
+- User-level systemd service en timer voor presentatie-refresh toegevoegd.
+- Kioskstart gecorrigeerd naar Wayland/labwc met `/usr/bin/chromium` als systemd user-service.
+- Chromium-profiel en cache gescheiden en cachebegrenzing via `CACHE_SIZE_MB` toegevoegd.
+- Oude refreshscript omgezet naar compatibiliteitswrapper voor `refresh-presentation.py`.

@@ -1,15 +1,14 @@
 [Unit]
-Description=Digital Signage Kiosk
-After=network-online.target graphical.target
+Description=Digital Signage Chromium kiosk
+After=graphical-session.target network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=bloemkool
 Environment=CONFIG_FILE=/etc/digitalsignage/digitalsignage.conf
 ExecStart=/opt/digitalsignage/scripts/start-kiosk.sh
 Restart=always
-RestartSec=10
+RestartSec=5
 
 [Install]
-WantedBy=graphical.target
+WantedBy=default.target

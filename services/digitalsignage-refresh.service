@@ -1,0 +1,12 @@
+[Unit]
+Description=Digital Signage presentatie vernieuwen
+After=default.target digitalsignage-kiosk.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/digitalsignage/scripts/refresh-presentation.py
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/.local/state/digitalsignage
+ReadOnlyPaths=/etc/digitalsignage

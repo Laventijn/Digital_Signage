@@ -1,10 +1,17 @@
-# Digital Signage configuration
+# Digital Signage configuratievoorbeeld
+# Plaats hier geen wachtwoorden, Wi-Fi-sleutels, tokens of andere geheimen.
 
-PRESENTATION_URL="https://example.org"
+PRESENTATION_URL="https://docs.google.com/presentation/d/1cUJkZT8T8xVz6g9N_PrCgHIF7wcKQy1bIRtCutK9z5E/present?start=true&loop=false&delayms=5000"
 OFFLINE_URL="file:///opt/digitalsignage/web/offline/index.html"
-CHROMIUM_BIN="chromium-browser"
-DISPLAY_ID=":0"
-CACHE_SIZE_MB="100"
+CHROMIUM_BIN="/usr/bin/chromium"
+WAYLAND_DISPLAY="wayland-0"
+CHROMIUM_PROFILE_DIR=".local/share/digitalsignage/chromium-profile"
+CHROMIUM_CACHE_DIR=".cache/digitalsignage/chromium"
+REMOTE_DEBUG_HOST="127.0.0.1"
+REMOTE_DEBUG_PORT=9222
+CACHE_SIZE_MB=100
+KIOSK_USER="bloemkool"
 NETWORK_CHECK_HOST="1.1.1.1"
 NETWORK_CHECK_TIMEOUT="3"
 REFRESH_SECONDS="30"
+SWAP_LOG_MAX_BYTES=5242880

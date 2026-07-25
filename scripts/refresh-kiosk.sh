@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
-pkill -HUP chromium 2>/dev/null || true
-pkill -HUP chromium-browser 2>/dev/null || true
+# Compatibiliteitswrapper: de echte refresh gebeurt via Chrome DevTools Protocol.
+exec /opt/digitalsignage/scripts/refresh-presentation.py

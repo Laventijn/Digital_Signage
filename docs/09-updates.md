@@ -6,8 +6,8 @@ Update de installatie met:
 sudo bash install/upgrade.sh
 ```
 
-Herstart daarna de kioskservice:
+Herstart daarna de kioskservice als kioskgebruiker:
 
 ```bash
-sudo systemctl restart digitalsignage-kiosk.service
+systemctl --user restart digitalsignage-kiosk.service
 ```

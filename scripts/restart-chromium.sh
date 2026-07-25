@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
-pkill chromium 2>/dev/null || true
-pkill chromium-browser 2>/dev/null || true
-systemctl restart digitalsignage-kiosk.service
+pkill -f "/usr/bin/chromium.*--kiosk" 2>/dev/null || true
+systemctl --user restart digitalsignage-kiosk.service
