@@ -41,6 +41,39 @@ run_user_journalctl() {
   run_as_kiosk_user journalctl --user "$@"
 }
 
+journal_has_entries() {
+  local output="$1"
+  [ -n "${output}" ] || return 1
+  if printf '%s\n' "${output}" | grep -E 'No journal files were found|-- No entries --' >/dev/null; then
+    return 1
+  fi
+  return 0
+}
+
+read_unit_journal() {
+  local unit="$1"
+  local output
+  output="$(run_user_journalctl -u "${unit}" -n 30 --no-pager 2>&1 || true)"
+  if journal_has_entries "${output}"; then
+    printf '%s\n' "${output}"
+    return 0
+  fi
+
+  printf '[INFO] Geen bruikbare journalregels via journalctl --user voor %s; probeer systeemjournal.\n' "${unit}"
+  if [ "$(id -u)" -eq 0 ]; then
+    output="$(journalctl "_SYSTEMD_USER_UNIT=${unit}" --no-pager -n 30 2>&1 || true)"
+    if journal_has_entries "${output}"; then
+      printf '%s\n' "${output}"
+      return 0
+    fi
+  else
+    printf '[INFO] Systeemjournalfallback vereist rootrechten.\n'
+  fi
+
+  printf '%s\n' "${output}"
+  return 1
+}
+
 get_user_unit_property() {
   local unit="$1"
   local property="$2"
@@ -350,12 +383,11 @@ test_journals() {
   for unit in digitalsignage-kiosk.service digitalsignage-refresh.service digitalsignage-refresh.timer digitalsignage-resource-log.service digitalsignage-resource-log.timer; do
     log_info "Laatste journalregels voor ${unit}"
     unit_state="$(run_user_systemctl show "${unit}" --property=Result --property=ExecMainStatus --property=ActiveState --no-pager 2>&1 || true)"
-    output="$(run_user_journalctl -u "${unit}" -n 30 --no-pager 2>&1 || true)"
+    output="$(read_unit_journal "${unit}" 2>&1)"
     printf '%s\n' "${output}"
-    if printf '%s\n' "${output}" | grep -F 'No journal files were found' >/dev/null &&
+    if ! journal_has_entries "${output}" &&
       printf '%s\n' "${unit_state}" | grep -E 'ActiveState=active|Result=success|ExecMainStatus=0' >/dev/null; then
-      log_error "Geen user-journal gevonden voor uitgevoerde unit: ${unit}"
-      return 1
+      log_warning "Geen journalregels gevonden voor gezonde of succesvol uitgevoerde unit: ${unit}"
     fi
   done
   return 0

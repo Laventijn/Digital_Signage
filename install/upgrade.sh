@@ -5,6 +5,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_DIR="/opt/digitalsignage"
 CONFIG_FILE="/etc/digitalsignage/digitalsignage.conf"
 CONFIG_DEFAULTS=(
+  "REFRESH_SECONDS=300"
   "RESOURCE_LOG_RETENTION_DAYS=3"
 )
 
@@ -74,11 +75,16 @@ if [ "${EUID}" -ne 0 ]; then
 fi
 
 KIOSK_USER="bloemkool"
+REFRESH_SECONDS="300"
 append_missing_config_defaults "${CONFIG_FILE}"
 if [ -f "${CONFIG_FILE}" ]; then
   configured_kiosk_user="$(read_config_value KIOSK_USER "${CONFIG_FILE}")"
   if [ -n "${configured_kiosk_user}" ]; then
     KIOSK_USER="${configured_kiosk_user}"
+  fi
+  configured_refresh_seconds="$(read_config_value REFRESH_SECONDS "${CONFIG_FILE}")"
+  if [ -n "${configured_refresh_seconds}" ]; then
+    REFRESH_SECONDS="${configured_refresh_seconds}"
   fi
 fi
 
@@ -96,6 +102,32 @@ install_project_files() {
     install -m 0755 "${script_file}" "${INSTALL_DIR}/scripts/$(basename "${script_file}")"
   done < <(find "${PROJECT_ROOT}/scripts" -maxdepth 1 -type f -print0)
   cp -R "${PROJECT_ROOT}/web" "${INSTALL_DIR}/"
+}
+
+refresh_interval() {
+  case "${REFRESH_SECONDS:-}" in
+    ''|*[!0-9]*|0) printf '300' ;;
+    *) printf '%s' "${REFRESH_SECONDS}" ;;
+  esac
+}
+
+write_refresh_timer() {
+  local timer_file="$1"
+  local interval
+  interval="$(refresh_interval)"
+  cat > "${timer_file}" <<EOF
+[Unit]
+Description=Digital Signage periodieke presentatie-refresh
+
+[Timer]
+OnBootSec=${interval}s
+OnUnitActiveSec=${interval}s
+AccuracySec=30s
+Unit=digitalsignage-refresh.service
+
+[Install]
+WantedBy=timers.target
+EOF
 }
 
 mkdir -p "${INSTALL_DIR}"
@@ -121,9 +153,9 @@ else
   mkdir -p "${user_unit_dir}"
   cp "${PROJECT_ROOT}/services/digitalsignage-kiosk.service" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-refresh.service" "${user_unit_dir}/"
-  cp "${PROJECT_ROOT}/services/digitalsignage-refresh.timer" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-resource-log.service" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-resource-log.timer" "${user_unit_dir}/"
+  write_refresh_timer "${user_unit_dir}/digitalsignage-refresh.timer"
   chown -R "${KIOSK_USER}:${KIOSK_USER}" "${user_home}/.config"
 
   # Maak de gebruikersstatusmap voordat user-services opnieuw geladen of gestart
@@ -138,6 +170,7 @@ else
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user daemon-reload
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-kiosk.service
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-refresh.timer
+    runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user restart digitalsignage-refresh.timer
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-resource-log.timer
   else
     echo "Geen actieve usersessie gevonden voor '${KIOSK_USER}'; user-services zijn bijgewerkt maar niet gestart."
@@ -150,5 +183,6 @@ else
 fi
 
 systemctl daemon-reload
+systemctl disable --now digitalsignage-healthcheck.timer 2>/dev/null || true
 
 echo "Upgrade klaar."

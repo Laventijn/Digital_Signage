@@ -7,6 +7,13 @@ systemctl --user status digitalsignage-kiosk.service
 journalctl --user -u digitalsignage-kiosk.service -n 100
 ```
 
+Wanneer `journalctl --user` geen regels toont, controleer dan de systeemjournal
+op de user-unitnaam:
+
+```bash
+sudo journalctl _SYSTEMD_USER_UNIT=digitalsignage-kiosk.service --no-pager -n 20
+```
+
 Controleer bij Wayland-problemen als kioskgebruiker:
 
 ```bash
@@ -32,7 +39,7 @@ scripts/restart-chromium.sh
 
 ## Presentatie Refresh
 
-De refresh gebeurt via Chrome DevTools Protocol op `127.0.0.1:9222`. Dit is betrouwbaarder dan F5, Ctrl+R of gesimuleerde toetsen, omdat Google Slides tijdens het afspelen `&slide=id...` aan de URL kan toevoegen. `Page.navigate` stuurt het bestaande Google Slides-tabblad terug naar de oorspronkelijke `PRESENTATION_URL`.
+De refresh gebeurt via Chrome DevTools Protocol op `127.0.0.1:9222`. Dit is betrouwbaarder dan F5, Ctrl+R of gesimuleerde toetsen, omdat Google Slides tijdens het afspelen `&slide=id...` aan de URL kan toevoegen. `Page.navigate` stuurt het bestaande Google Slides-tabblad terug naar de oorspronkelijke `PRESENTATION_URL`. Google Slides speelt zelf af en loopt via `loop=true`; de refresh haalt standaard ongeveer iedere vijf minuten wijzigingen op.
 
 Timerstatus bekijken als kioskgebruiker:
 
@@ -48,9 +55,10 @@ systemctl --user start digitalsignage-refresh.service
 
 ## RAM- En Swaplog
 
-RAM- en swaplogging staat los van de presentatie-refresh. De presentatie wordt
-standaard iedere 30 seconden vernieuwd, terwijl `digitalsignage-resource-log.timer`
-iedere 10 minuten een compacte regel schrijft naar:
+RAM- en swaplogging staat los van de presentatie-refresh. De presentatie-refresh
+draait standaard ongeveer iedere vijf minuten, terwijl
+`digitalsignage-resource-log.timer` iedere 10 minuten een compacte regel
+schrijft naar:
 
 ```bash
 ~/.local/state/digitalsignage/swap.log
@@ -81,6 +89,30 @@ rm -f ~/.local/state/digitalsignage/swap.log ~/.local/state/digitalsignage/swap.
 ```
 
 Logregels ouder dan 3 dagen worden automatisch verwijderd.
+
+## Testlogs En Python-Cache
+
+Testlogs staan in `test-logs/`. Als de pre-test meldt dat die map niet
+schrijfbaar is:
+
+```bash
+sudo chown -R "$USER":"$(id -gn)" test-logs
+```
+
+Python-cachebestanden zoals `__pycache__/` en `*.pyc` horen niet in Git en
+worden door `.gitignore` uitgesloten.
+
+## Windows Fase-2-Test
+
+Vanaf Windows kan de Raspberry Pi-test gestart worden met:
+
+```powershell
+cmd /c "tools\windows\test-fase1-pi.bat"
+```
+
+Pas zo nodig bovenaan in de batchfile `PI_USER`, `PI_HOST` en `PI_PROJECT_PATH`
+aan. De batch gebruikt Windows `ssh` en `scp`, slaat alle uitvoer op onder
+`tools\windows\logs\` en bewaart geen wachtwoorden.
 
 ## Fontconfig-Waarschuwing
 

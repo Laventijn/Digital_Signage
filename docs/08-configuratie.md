@@ -20,20 +20,20 @@ Zie `config/digitalsignage.conf.example` voor alle opties.
 - `CHROMIUM_BIN`: standaard `/usr/bin/chromium`.
 - `CHROMIUM_PROFILE_DIR`: profielmap relatief aan de home van de kioskgebruiker.
 - `CHROMIUM_CACHE_DIR`: cachemap relatief aan de home van de kioskgebruiker.
-- `REFRESH_SECONDS`: gewenste refreshinterval in seconden.
+- `REFRESH_SECONDS`: gewenste refreshinterval in seconden; standaard `300`.
 - `CACHE_SIZE_MB`: begrensde Chromium-cachegrootte in MiB.
 - `KIOSK_USER`: lokale kioskgebruiker.
 - `SWAP_LOG_MAX_BYTES`: maximale grootte van `swap.log` voor rotatie.
 - `RESOURCE_LOG_RETENTION_DAYS`: aantal dagen dat RAM- en swaplogregels bewaard blijven.
 
-`REFRESH_SECONDS` wijzigt momenteel nog niet automatisch de systemd timerwaarde. De timer staat standaard op 30 seconden in `digitalsignage-refresh.timer`.
+De installer en upgrader schrijven `digitalsignage-refresh.timer` op basis van `REFRESH_SECONDS`. Een bestaande aangepaste waarde wordt bij upgrade niet overschreven.
 De resource-logtimer staat standaard op 10 minuten in `digitalsignage-resource-log.timer`.
 
 Plaats geen wachtwoorden, Wi-Fi-sleutels, tokens of andere geheimen in dit configuratiebestand wanneer het in Git terecht kan komen.
 
 ## Google Slides URL
 
-Google Slides voegt tijdens het afspelen vaak `&slide=id...` aan de URL toe. De refresh gebruikt daarom geen F5 of gesimuleerde toetsen, maar stuurt het bestaande tabblad via Chrome DevTools Protocol terug naar de oorspronkelijke `PRESENTATION_URL`.
+Google Slides voegt tijdens het afspelen vaak `&slide=id...` aan de URL toe. De refresh gebruikt daarom geen F5 of gesimuleerde toetsen, maar stuurt het bestaande tabblad via Chrome DevTools Protocol terug naar de oorspronkelijke `PRESENTATION_URL`. Gebruik voor automatisch doorlopen `loop=true` in de URL.
 
 ## Chromium Op Wayland
 

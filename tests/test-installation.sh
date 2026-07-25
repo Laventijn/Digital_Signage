@@ -17,6 +17,7 @@ required_files=(
   "services/digitalsignage-resource-log.timer"
   "tests/test-upgrade-config-merge.sh"
   "tests/test-resource-log-retention.py"
+  "tests/test-refresh-presentation.py"
   "web/offline/index.html"
 )
 
@@ -28,7 +29,7 @@ for file in "${required_files[@]}"; do
 done
 
 home_prefix="/home"
-if grep -R -n -E "${home_prefix}/(pi|bloemkool)" "${ROOT_DIR}/install" "${ROOT_DIR}/scripts" "${ROOT_DIR}/services" "${ROOT_DIR}/config"; then
+if grep -R -n -E --exclude-dir=__pycache__ --exclude='*.pyc' --exclude='*.pyo' "${home_prefix}/(pi|bloemkool)" "${ROOT_DIR}/install" "${ROOT_DIR}/scripts" "${ROOT_DIR}/services" "${ROOT_DIR}/config"; then
   echo "Hardcoded homepad gevonden." >&2
   exit 1
 fi

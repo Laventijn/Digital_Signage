@@ -75,8 +75,12 @@ Daarom gebruikt het project Chrome DevTools Protocol:
 
 1. Chromium luistert lokaal op poort `9222`.
 2. `refresh-presentation.py` vraagt de actieve targets op via `/json`.
-3. Het script zoekt het Google Slides-tabblad.
+3. Het script zoekt bij voorkeur het Google Slides-tabblad.
 4. Het stuurt `Page.navigate` naar exact `PRESENTATION_URL`.
+
+Google Slides speelt zelf door en gebruikt `loop=true`. De refresh is dus geen
+afspeelmechanisme, maar haalt periodiek wijzigingen aan de online presentatie
+op.
 
 ### systemd User-Services
 
@@ -97,7 +101,7 @@ Er hoort geen `User=`-regel in deze user-units te staan.
 ### Statusmap En Logging
 
 De presentatie-refresh en resource-logging zijn gescheiden. De refreshtimer
-navigeert de presentatie standaard iedere 30 seconden terug naar
+navigeert de presentatie standaard iedere vijf minuten terug naar
 `PRESENTATION_URL`. De resource-logtimer schrijft iedere 10 minuten RAM- en
 swapgebruik naar:
 
@@ -136,6 +140,16 @@ Logs komen terecht in:
 ```text
 test-logs/
 ```
+
+Wanneer die map niet schrijfbaar is voor de gewone gebruiker, herstel je dat
+met:
+
+```bash
+sudo chown -R "$USER":"$(id -gn)" test-logs
+```
+
+Python-cachebestanden horen niet in Git. `.gitignore` sluit `__pycache__/` en
+`*.py[cod]` uit.
 
 Resultaatcategorieen:
 

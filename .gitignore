@@ -11,7 +11,7 @@ tmp/
 temp/
 test-logs/
 __pycache__/
-*.pyc
+*.py[cod]
 
 # Secrets/local config
 *.local

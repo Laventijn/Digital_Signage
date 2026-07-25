@@ -20,4 +20,5 @@ Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 - Pre-installatietest gecorrigeerd voor systemd-user-verificatie zonder `sudo` en installatie van scripts met modus `0755`.
 - Upgrade vult ontbrekende configuratievariabelen idempotent aan en post-installatietests corrigeren Chromium-, oneshot- en user-journalcontroles.
 - Standaard Google Slides-presentatie-URL aangepast naar `loop=true`.
+- Fase 2-stabiliteitswerk gestart: Python-cache uit Git, testlogrechten gecontroleerd, user-journalfallback toegevoegd en standaard presentatie-refresh naar vijf minuten verlaagd.
 - Losse documentatienotities samengevoegd in de genummerde documentatie.

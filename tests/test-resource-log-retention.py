@@ -7,6 +7,7 @@ import importlib.util
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -45,6 +46,40 @@ def main() -> int:
         result = log_file.read_text(encoding="utf-8")
         assert recent_old_style in result
         assert expired_old_style not in result
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        home = Path(temp_dir)
+        fake_fields = {
+            "ram_used_mib": 10,
+            "ram_available_mib": 20,
+            "swap_used_mib": 1,
+            "swap_free_mib": 2,
+        }
+        with mock.patch.object(module.Path, "home", return_value=home), mock.patch.object(module, "memory_fields", return_value=fake_fields):
+            module.write_resource_log(max_bytes=1024 * 1024, retention_days=3)
+            log_file = home / ".local" / "state" / "digitalsignage" / "swap.log"
+            assert log_file.exists()
+            lines = log_file.read_text(encoding="utf-8").splitlines()
+            assert len(lines) == 1
+            assert "resource=ok" in lines[0]
+            assert "ram_used_mib=10" in lines[0]
+            assert "ram_available_mib=20" in lines[0]
+            assert "swap_used_mib=1" in lines[0]
+            assert "swap_free_mib=2" in lines[0]
+
+            module.write_resource_log(max_bytes=1024 * 1024, retention_days=3)
+            lines = log_file.read_text(encoding="utf-8").splitlines()
+            assert len(lines) == 2
+
+    assert module.int_config({"RESOURCE_LOG_RETENTION_DAYS": ""}, "RESOURCE_LOG_RETENTION_DAYS", 3) == 3
+    assert module.int_config({"RESOURCE_LOG_RETENTION_DAYS": "ongeldig"}, "RESOURCE_LOG_RETENTION_DAYS", 3) == 3
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        log_file = Path(temp_dir) / "swap.log"
+        log_file.write_text("x" * 64, encoding="utf-8")
+        module.rotate_log_if_needed(log_file, max_bytes=10)
+        assert not log_file.exists()
+        assert log_file.with_name("swap.log.1").exists()
 
     print("Resource-logretentie OK.")
     return 0

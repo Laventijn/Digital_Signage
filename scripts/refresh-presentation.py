@@ -69,12 +69,17 @@ def fetch_targets(host: str, port: int) -> list[dict[str, object]]:
 
 
 def find_presentation_target(targets: list[dict[str, object]]) -> dict[str, object]:
+    first_page_target = None
     for target in targets:
         if target.get("type") != "page":
             continue
+        if first_page_target is None:
+            first_page_target = target
         url = str(target.get("url", ""))
         if "docs.google.com/presentation/" in url:
             return target
+    if first_page_target is not None:
+        return first_page_target
     raise RefreshError("Geen bestaand Google Slides-tabblad gevonden.")
 
 

@@ -23,7 +23,7 @@ sudo bash install/install.sh
 
 ## Google Slides Refresh En Resource-Logging
 
-De presentatie wordt vernieuwd via Chrome DevTools Protocol. Dit gebruikt geen F5, Ctrl+R of gesimuleerde toetsen. Google Slides voegt tijdens het afspelen vaak `&slide=id...` toe aan de URL; `Page.navigate` stuurt het bestaande tabblad telkens terug naar de oorspronkelijke `PRESENTATION_URL`.
+Google Slides speelt zelf af en loopt door via `loop=true` in de presentatie-URL. De periodieke refresh haalt alleen wijzigingen aan de online presentatie op. Dit gebeurt via Chrome DevTools Protocol en gebruikt geen F5, Ctrl+R of gesimuleerde toetsen. Google Slides voegt tijdens het afspelen vaak `&slide=id...` toe aan de URL; `Page.navigate` stuurt het bestaande tabblad terug naar de oorspronkelijke `PRESENTATION_URL`.
 
 De kiosk draait als systemd user-service. Chromium gebruikt Wayland, een afzonderlijke profielmap en een afzonderlijke cachemap. De cachegrootte wordt begrensd via `CACHE_SIZE_MB`.
 
@@ -57,10 +57,11 @@ Live meekijken:
 tail -f ~/.local/state/digitalsignage/swap.log
 ```
 
-Die resource-log staat los van de presentatie-refresh. De presentatie wordt
-standaard iedere 30 seconden vernieuwd, terwijl RAM en swap iedere 10 minuten
-worden opgeslagen via `digitalsignage-resource-log.timer`. Logregels ouder dan
-3 dagen worden automatisch opgeruimd.
+Die resource-log staat los van de presentatie-refresh. De presentatie-refresh
+draait standaard ongeveer iedere vijf minuten (`REFRESH_SECONDS=300`), terwijl
+RAM en swap iedere 10 minuten worden opgeslagen via
+`digitalsignage-resource-log.timer`. Logregels ouder dan 3 dagen worden
+automatisch opgeruimd.
 
 ## Documentatie
 
@@ -84,3 +85,11 @@ De testlogs worden opgeslagen onder:
 ```bash
 test-logs/
 ```
+
+Als `test-logs/` verkeerde rechten heeft:
+
+```bash
+sudo chown -R "$USER":"$(id -gn)" test-logs
+```
+
+Python-cache blijft buiten Git via `.gitignore` (`__pycache__/` en `*.py[cod]`).

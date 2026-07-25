@@ -124,6 +124,7 @@ test_repository() {
     "config/digitalsignage.conf.example"
     "tests/test-upgrade-config-merge.sh"
     "tests/test-resource-log-retention.py"
+    "tests/test-refresh-presentation.py"
   )
 
   for file in "${required_files[@]}"; do
@@ -176,21 +177,17 @@ test_bash_syntax() {
 }
 
 test_python_syntax() {
-  local cache_dir="${TEST_ROOT_DIR}/scripts/__pycache__"
-  local before_marker after_marker
-  before_marker="$(find "${cache_dir}" -type f \( -name 'refresh-presentation*.pyc' -o -name 'log-resources*.pyc' \) -print 2>/dev/null || true)"
-  if python3 -m py_compile "${TEST_ROOT_DIR}/scripts/refresh-presentation.py" "${TEST_ROOT_DIR}/scripts/log-resources.py" "${TEST_ROOT_DIR}/tests/test-resource-log-retention.py"; then
+  local pycache_dir
+  pycache_dir="$(mktemp -d)"
+  if PYTHONPYCACHEPREFIX="${pycache_dir}" python3 -m py_compile "${TEST_ROOT_DIR}/scripts/refresh-presentation.py" "${TEST_ROOT_DIR}/scripts/log-resources.py" "${TEST_ROOT_DIR}/tests/test-resource-log-retention.py" "${TEST_ROOT_DIR}/tests/test-refresh-presentation.py"; then
     log_ok "Python-syntaxis is geldig"
   else
+    rm -rf "${pycache_dir}"
     log_error "Python-syntaxiscontrole faalt"
     return 1
   fi
-  after_marker="$(find "${cache_dir}" -type f \( -name 'refresh-presentation*.pyc' -o -name 'log-resources*.pyc' \) -print 2>/dev/null || true)"
-  if [ -n "${after_marker}" ] && [ "${after_marker}" != "${before_marker}" ]; then
-    find "${cache_dir}" -type f \( -name 'refresh-presentation*.pyc' -o -name 'log-resources*.pyc' \) -delete 2>/dev/null || true
-    rmdir "${cache_dir}" 2>/dev/null || true
-    log_info "Door py_compile gemaakte cache veilig opgeruimd"
-  fi
+  rm -rf "${pycache_dir}"
+  log_info "Python-cache is buiten de repository aangemaakt en opgeruimd"
   return 0
 }
 
@@ -290,12 +287,21 @@ test_resource_log_retention() {
   fi
 }
 
+test_refresh_presentation_unit() {
+  if python3 "${TEST_ROOT_DIR}/tests/test-refresh-presentation.py"; then
+    log_ok "Refresh-presentatie unit tests slagen"
+  else
+    log_error "Refresh-presentatie unit tests falen"
+    return 1
+  fi
+}
+
 test_forbidden_patterns() {
   local failed=0
   local pattern
   local home_prefix="/home"
   for pattern in "${home_prefix}/pi" "${home_prefix}/bloemkool" 'chromium-browser' 'DISPLAY=:0' 'export DISPLAY' 'DISPLAY_ID' 'xdotool' 'pkill -HUP'; do
-    if grep -R -n -F "${pattern}" "${TEST_ROOT_DIR}/install" "${TEST_ROOT_DIR}/scripts" "${TEST_ROOT_DIR}/services" "${TEST_ROOT_DIR}/config"; then
+    if grep -R -n -F --exclude-dir=__pycache__ --exclude='*.pyc' --exclude='*.pyo' "${pattern}" "${TEST_ROOT_DIR}/install" "${TEST_ROOT_DIR}/scripts" "${TEST_ROOT_DIR}/services" "${TEST_ROOT_DIR}/config"; then
       log_error "Verboden patroon gevonden: ${pattern}"
       failed=1
     else
@@ -324,6 +330,8 @@ test_config() {
   [ "${value}" = "127.0.0.1" ] && log_ok "REMOTE_DEBUG_HOST correct" || { log_error "REMOTE_DEBUG_HOST is '${value}'"; failed=1; }
   value="$(read_config_value REMOTE_DEBUG_PORT "${config}")"
   [ "${value}" = "9222" ] && log_ok "REMOTE_DEBUG_PORT correct" || { log_error "REMOTE_DEBUG_PORT is '${value}'"; failed=1; }
+  value="$(read_config_value REFRESH_SECONDS "${config}")"
+  [ "${value}" = "300" ] && log_ok "REFRESH_SECONDS standaard 300" || { log_error "REFRESH_SECONDS is '${value}', verwacht 300"; failed=1; }
 
   return "${failed}"
 }
@@ -347,7 +355,7 @@ test_state_directory_fix() {
   fi
 
   local home_prefix="/home"
-  if grep -R -n -E "${home_prefix}/(pi|bloemkool)" "${TEST_ROOT_DIR}/install" "${TEST_ROOT_DIR}/scripts" "${TEST_ROOT_DIR}/services" "${TEST_ROOT_DIR}/config"; then
+  if grep -R -n -E --exclude-dir=__pycache__ --exclude='*.pyc' --exclude='*.pyo' "${home_prefix}/(pi|bloemkool)" "${TEST_ROOT_DIR}/install" "${TEST_ROOT_DIR}/scripts" "${TEST_ROOT_DIR}/services" "${TEST_ROOT_DIR}/config"; then
     log_error "Hardcoded kiosk-homefolder gevonden"
     failed=1
   else
@@ -382,6 +390,7 @@ run_test "systemd-units" test_systemd_units
 run_test "Uitvoerrechten installatie" test_installer_executable_modes
 run_test "Upgradeconfiguratie-merge" test_upgrade_config_merge
 run_test "Resource-logretentie" test_resource_log_retention
+run_test "Refresh-presentatie unit tests" test_refresh_presentation_unit
 run_test "Verboden patronen" test_forbidden_patterns
 run_test "Configuratie" test_config
 run_test "Statusmap-oplossing" test_state_directory_fix

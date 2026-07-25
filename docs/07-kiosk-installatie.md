@@ -45,7 +45,7 @@ systemctl --user status digitalsignage-kiosk.service
 
 ## Refresh Timer En Resource-Logtimer
 
-De Google Slides-refresh gebruikt een systemd user-timer voor de kioskgebruiker. RAM- en swaplogging gebruikt een aparte user-timer, zodat de presentatie vaak kan vernieuwen zonder iedere refresh een logregel te schrijven. De unitbestanden worden geinstalleerd onder:
+De Google Slides-refresh gebruikt een systemd user-timer voor de kioskgebruiker. Google Slides speelt zelf af en loopt via `loop=true`; de refresh haalt alleen periodiek wijzigingen op. Standaard gebeurt dat ongeveer iedere vijf minuten via `REFRESH_SECONDS=300`. RAM- en swaplogging gebruikt een aparte user-timer van 10 minuten. De unitbestanden worden geinstalleerd onder:
 
 ```bash
 ~/.config/systemd/user/
@@ -67,6 +67,12 @@ Status bekijken:
 ```bash
 systemctl --user status digitalsignage-refresh.timer
 systemctl --user status digitalsignage-resource-log.timer
+```
+
+Op Raspberry Pi OS Trixie staan user-unitlogs soms vooral in de systeemjournal:
+
+```bash
+sudo journalctl _SYSTEMD_USER_UNIT=digitalsignage-kiosk.service --no-pager -n 20
 ```
 
 Handmatig een refresh uitvoeren:

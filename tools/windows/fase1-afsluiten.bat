@@ -1,10 +1,10 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
-set "DEFAULT_COMMIT_MESSAGE=Rond fase 1 resource logging af"
+set "DEFAULT_COMMIT_MESSAGE=Rond Fase 2A - Stabiliteit, tests en repository-opruiming af"
 
 echo.
-echo === Fase 1 afsluiten ===
+echo === Fase 2 afsluiten ===
 echo.
 set /p "COMMIT_MESSAGE=Commitbericht [%DEFAULT_COMMIT_MESSAGE%]: "
 
@@ -40,7 +40,7 @@ echo [INFO] Huidige branch: %BRANCH%
 if /i not "%BRANCH%"=="main" (
   echo [WAARSCHUWING] Je werkt niet op branch main.
   set /p "CONTINUE_BRANCH=Toch doorgaan op branch '%BRANCH%'? (j/n): "
-  if /i not "%CONTINUE_BRANCH%"=="j" if /i not "%CONTINUE_BRANCH%"=="ja" (
+  if /i not "!CONTINUE_BRANCH!"=="j" if /i not "!CONTINUE_BRANCH!"=="ja" (
     echo Gestopt zonder wijzigingen.
     exit /b 0
   )
@@ -145,5 +145,5 @@ if "%FINAL_STATUS_SIZE%"=="0" (
 )
 
 echo.
-echo [KLAAR] Fase 1 is gecommit en gepusht.
+echo [KLAAR] De wijzigingen zijn gecommit en gepusht.
 exit /b 0

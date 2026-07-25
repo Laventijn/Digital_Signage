@@ -1,10 +1,10 @@
 [Unit]
-Description=Digital Signage refresh elke 30 seconden
+Description=Digital Signage periodieke presentatie-refresh
 
 [Timer]
-OnBootSec=30s
-OnUnitActiveSec=30s
-AccuracySec=1s
+OnBootSec=300s
+OnUnitActiveSec=300s
+AccuracySec=30s
 Unit=digitalsignage-refresh.service
 
 [Install]

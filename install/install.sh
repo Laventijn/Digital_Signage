@@ -32,10 +32,37 @@ install_packages() {
 
 load_config() {
   KIOSK_USER="bloemkool"
+  REFRESH_SECONDS="300"
   if [ -f "${CONFIG_FILE}" ]; then
     # shellcheck source=/dev/null
     source "${CONFIG_FILE}"
   fi
+}
+
+refresh_interval() {
+  case "${REFRESH_SECONDS:-}" in
+    ''|*[!0-9]*|0) printf '300' ;;
+    *) printf '%s' "${REFRESH_SECONDS}" ;;
+  esac
+}
+
+write_refresh_timer() {
+  local timer_file="$1"
+  local interval
+  interval="$(refresh_interval)"
+  cat > "${timer_file}" <<EOF
+[Unit]
+Description=Digital Signage periodieke presentatie-refresh
+
+[Timer]
+OnBootSec=${interval}s
+OnUnitActiveSec=${interval}s
+AccuracySec=30s
+Unit=digitalsignage-refresh.service
+
+[Install]
+WantedBy=timers.target
+EOF
 }
 
 install_project_files() {
@@ -70,9 +97,9 @@ install_user_units() {
   mkdir -p "${user_unit_dir}"
   cp "${PROJECT_ROOT}/services/digitalsignage-kiosk.service" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-refresh.service" "${user_unit_dir}/"
-  cp "${PROJECT_ROOT}/services/digitalsignage-refresh.timer" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-resource-log.service" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-resource-log.timer" "${user_unit_dir}/"
+  write_refresh_timer "${user_unit_dir}/digitalsignage-refresh.timer"
   chown -R "${KIOSK_USER}:${KIOSK_USER}" "${user_home}/.config"
 
   # Maak de gebruikersstatusmap voordat user-services starten. De resource-
@@ -87,6 +114,7 @@ install_user_units() {
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user daemon-reload
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-kiosk.service
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-refresh.timer
+    runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user restart digitalsignage-refresh.timer
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-resource-log.timer
   else
     echo "Geen actieve usersessie gevonden voor '${KIOSK_USER}'; user-services zijn geinstalleerd maar niet gestart."
@@ -121,6 +149,6 @@ cp "${PROJECT_ROOT}/services/digitalsignage-healthcheck.timer" "${SERVICE_DIR}/"
 install_user_units
 
 systemctl daemon-reload
-systemctl enable digitalsignage-healthcheck.timer
+systemctl disable --now digitalsignage-healthcheck.timer 2>/dev/null || true
 
 echo "Installatie klaar. Controleer ${CONFIG_FILE} en start de kioskservices waar nodig."

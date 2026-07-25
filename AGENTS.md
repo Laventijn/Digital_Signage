@@ -11,7 +11,7 @@ De kiosk:
 * draait op Raspberry Pi OS 64-bit Trixie;
 * gebruikt Chromium in kioskmodus;
 * toont voornamelijk een Google Slides-presentatie;
-* vernieuwt de presentatie standaard iedere 30 seconden;
+* vernieuwt de presentatie standaard ongeveer iedere vijf minuten;
 * moet automatisch herstellen na een Chromium-crash;
 * moet netwerk- en IP-informatie duidelijk kunnen tonen;
 * moet later eenvoudig door een ICT-medewerker beheerd kunnen worden.
@@ -115,7 +115,7 @@ Verwachte instellingen kunnen onder andere zijn:
 
 ```ini
 PRESENTATION_URL=""
-REFRESH_SECONDS=30
+REFRESH_SECONDS=300
 CACHE_SIZE_MB=100
 HOSTNAME_LABEL="signage-01"
 ```

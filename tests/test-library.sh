@@ -21,7 +21,16 @@ COLOR_RESET=""
 
 init_test_context() {
   TEST_CONTEXT_NAME="$1"
+  if [ -e "${TEST_LOG_DIR}" ] && [ ! -d "${TEST_LOG_DIR}" ]; then
+    printf '[FOUT] test-logs bestaat, maar is geen map: %s\n' "${TEST_LOG_DIR}" >&2
+    exit 1
+  fi
   mkdir -p "${TEST_LOG_DIR}"
+  if [ ! -w "${TEST_LOG_DIR}" ]; then
+    printf '[FOUT] test-logs is niet schrijfbaar: %s\n' "${TEST_LOG_DIR}" >&2
+    printf '[INFO] Herstel op Linux met: sudo chown -R "$USER":"$(id -gn)" test-logs\n' >&2
+    exit 1
+  fi
   local timestamp
   timestamp="$(date '+%Y-%m-%d_%H%M%S')"
   TEST_LOG_FILE="${TEST_LOG_DIR}/${TEST_CONTEXT_NAME}-${timestamp}.log"
