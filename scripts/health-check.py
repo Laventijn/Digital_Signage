@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Controleert de Chromium-kiosk en herstelt gecontroleerd bij herhaalde fouten."""
+"""Controleert de Chromium-kiosk en beheert betrouwbaar offline gedrag."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,14 @@ try:
 except ImportError:  # pragma: no cover - alleen relevant voor lokale Windows-tests
     pwd = None  # type: ignore[assignment]
 
+try:
+    import websocket
+except ImportError as exc:  # pragma: no cover - afhankelijk van het Pi-pakket
+    websocket = None
+    WEBSOCKET_IMPORT_ERROR = exc
+else:
+    WEBSOCKET_IMPORT_ERROR = None
+
 
 CONFIG_FILE = Path(os.environ.get("CONFIG_FILE", "/etc/digitalsignage/digitalsignage.conf"))
 KIOSK_SERVICE = "digitalsignage-kiosk.service"
@@ -31,6 +39,12 @@ KIOSK_SERVICE = "digitalsignage-kiosk.service"
 DEFAULTS: dict[str, str] = {
     "PRESENTATION_URL": "",
     "OFFLINE_URL": "file:///opt/digitalsignage/web/offline/index.html",
+    "OFFLINE_PAGE_URL": "file:///opt/digitalsignage/offline/index.html",
+    "OFFLINE_PAGE_ENABLED": "true",
+    "OFFLINE_AFTER_SECONDS": "300",
+    "ONLINE_CONFIRM_SECONDS": "30",
+    "CONNECTIVITY_CHECK_URL": "https://clients3.google.com/generate_204",
+    "CONNECTIVITY_TIMEOUT_SECONDS": "8",
     "REMOTE_DEBUG_HOST": "127.0.0.1",
     "REMOTE_DEBUG_PORT": "9222",
     "KIOSK_USER": "",
@@ -51,11 +65,24 @@ DEFAULT_STATE: dict[str, Any] = {
     "last_restart_reason": None,
 }
 
+DEFAULT_CONNECTIVITY_STATE: dict[str, Any] = {
+    "STATUS": "online",
+    "OFFLINE_SINCE": 0,
+    "ONLINE_SINCE": 0,
+    "OFFLINE_PAGE_SHOWN": False,
+}
+
 
 @dataclass
 class HealthConfig:
     presentation_url: str
     offline_url: str
+    offline_page_url: str
+    offline_page_enabled: bool
+    offline_after_seconds: int
+    online_confirm_seconds: int
+    connectivity_check_url: str
+    connectivity_timeout_seconds: int
     remote_debug_host: str
     remote_debug_port: int
     kiosk_user: str
@@ -65,6 +92,7 @@ class HealthConfig:
     startup_grace_seconds: int
     log_retention_days: int
     log_max_bytes: int
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -75,8 +103,26 @@ class CheckResult:
     pid: int = 0
     debug_port: str = "unknown"
     page: str = "unknown"
+    page_url: str = ""
+    websocket_url: str = ""
     reason: str = "none"
     startup_grace: bool = False
+
+
+@dataclass
+class ConnectivityResult:
+    online: bool
+    status: str
+    nm: str
+    http: str
+    reason: str
+
+
+@dataclass
+class ConnectivityAction:
+    state: dict[str, Any]
+    action: str
+    reason: str
 
 
 def now() -> datetime:
@@ -104,27 +150,52 @@ def read_config(path: Path) -> dict[str, str]:
     return config
 
 
-def int_config(config: dict[str, str], key: str, default: int, minimum: int = 1) -> int:
+def int_config(config: dict[str, str], key: str, default: int, minimum: int = 1, warnings: list[str] | None = None) -> int:
     try:
         value = int(str(config.get(key, default)).strip())
     except (TypeError, ValueError):
+        if warnings is not None:
+            warnings.append(f"ongeldige configuratiewaarde voor {key}; standaardwaarde {default} wordt gebruikt")
         return default
-    return value if value >= minimum else default
+    if value < minimum:
+        if warnings is not None:
+            warnings.append(f"ongeldige configuratiewaarde voor {key}; standaardwaarde {default} wordt gebruikt")
+        return default
+    return value
+
+
+def bool_config(config: dict[str, str], key: str, default: bool, warnings: list[str] | None = None) -> bool:
+    value = str(config.get(key, str(default))).strip().lower()
+    if value in {"1", "true", "yes", "ja", "on"}:
+        return True
+    if value in {"0", "false", "no", "nee", "off"}:
+        return False
+    if warnings is not None:
+        warnings.append(f"ongeldige configuratiewaarde voor {key}; standaardwaarde {str(default).lower()} wordt gebruikt")
+    return default
 
 
 def build_config(raw: dict[str, str]) -> HealthConfig:
+    warnings: list[str] = []
     return HealthConfig(
         presentation_url=raw.get("PRESENTATION_URL", "").strip(),
         offline_url=raw.get("OFFLINE_URL", DEFAULTS["OFFLINE_URL"]).strip(),
+        offline_page_url=raw.get("OFFLINE_PAGE_URL", DEFAULTS["OFFLINE_PAGE_URL"]).strip() or DEFAULTS["OFFLINE_PAGE_URL"],
+        offline_page_enabled=bool_config(raw, "OFFLINE_PAGE_ENABLED", True, warnings),
+        offline_after_seconds=int_config(raw, "OFFLINE_AFTER_SECONDS", 300, minimum=1, warnings=warnings),
+        online_confirm_seconds=int_config(raw, "ONLINE_CONFIRM_SECONDS", 30, minimum=0, warnings=warnings),
+        connectivity_check_url=raw.get("CONNECTIVITY_CHECK_URL", DEFAULTS["CONNECTIVITY_CHECK_URL"]).strip() or DEFAULTS["CONNECTIVITY_CHECK_URL"],
+        connectivity_timeout_seconds=int_config(raw, "CONNECTIVITY_TIMEOUT_SECONDS", 8, minimum=1, warnings=warnings),
         remote_debug_host=raw.get("REMOTE_DEBUG_HOST", DEFAULTS["REMOTE_DEBUG_HOST"]).strip() or DEFAULTS["REMOTE_DEBUG_HOST"],
-        remote_debug_port=int_config(raw, "REMOTE_DEBUG_PORT", 9222),
+        remote_debug_port=int_config(raw, "REMOTE_DEBUG_PORT", 9222, warnings=warnings),
         kiosk_user=raw.get("KIOSK_USER", "").strip() or current_user_name(),
-        failure_threshold=int_config(raw, "HEALTH_FAILURE_THRESHOLD", 3),
-        restart_cooldown_seconds=int_config(raw, "HEALTH_RESTART_COOLDOWN_SECONDS", 600),
-        http_timeout_seconds=int_config(raw, "HEALTH_HTTP_TIMEOUT_SECONDS", 5),
-        startup_grace_seconds=int_config(raw, "HEALTH_STARTUP_GRACE_SECONDS", 90, minimum=0),
-        log_retention_days=int_config(raw, "HEALTH_LOG_RETENTION_DAYS", 3),
-        log_max_bytes=int_config(raw, "HEALTH_LOG_MAX_BYTES", 5 * 1024 * 1024),
+        failure_threshold=int_config(raw, "HEALTH_FAILURE_THRESHOLD", 3, warnings=warnings),
+        restart_cooldown_seconds=int_config(raw, "HEALTH_RESTART_COOLDOWN_SECONDS", 600, warnings=warnings),
+        http_timeout_seconds=int_config(raw, "HEALTH_HTTP_TIMEOUT_SECONDS", 5, warnings=warnings),
+        startup_grace_seconds=int_config(raw, "HEALTH_STARTUP_GRACE_SECONDS", 90, minimum=0, warnings=warnings),
+        log_retention_days=int_config(raw, "HEALTH_LOG_RETENTION_DAYS", 3, warnings=warnings),
+        log_max_bytes=int_config(raw, "HEALTH_LOG_MAX_BYTES", 5 * 1024 * 1024, warnings=warnings),
+        warnings=warnings,
     )
 
 
@@ -178,6 +249,76 @@ def atomic_write_json(path: Path, data: dict[str, Any]) -> None:
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
+        os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, path)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+
+
+def valid_unix_timestamp(value: Any, reference_timestamp: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    if parsed < 0 or parsed > reference_timestamp + 60:
+        return 0
+    return parsed
+
+
+def parse_bool_state(value: str) -> bool | None:
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    return None
+
+
+def load_connectivity_state(path: Path, reference_timestamp: int | None = None) -> tuple[dict[str, Any], str | None]:
+    reference = int(time.time()) if reference_timestamp is None else reference_timestamp
+    state = dict(DEFAULT_CONNECTIVITY_STATE)
+    warning = None
+    if not path.exists():
+        return state, None
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        return state, f"connectiviteitsstate is onleesbaar en wordt hersteld: {exc}"
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if key == "STATUS" and value in {"online", "offline"}:
+            state[key] = value
+        elif key in {"OFFLINE_SINCE", "ONLINE_SINCE"}:
+            state[key] = valid_unix_timestamp(value, reference)
+        elif key == "OFFLINE_PAGE_SHOWN":
+            parsed_bool = parse_bool_state(value)
+            if parsed_bool is not None:
+                state[key] = parsed_bool
+    return state, warning
+
+
+def atomic_write_connectivity_state(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    lines = [
+        f"STATUS={data.get('STATUS', 'online') if data.get('STATUS') in {'online', 'offline'} else 'online'}",
+        f"OFFLINE_SINCE={int(data.get('OFFLINE_SINCE', 0) or 0)}",
+        f"ONLINE_SINCE={int(data.get('ONLINE_SINCE', 0) or 0)}",
+        f"OFFLINE_PAGE_SHOWN={'true' if bool(data.get('OFFLINE_PAGE_SHOWN', False)) else 'false'}",
+    ]
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp_name, 0o600)
         os.replace(tmp_name, path)
     finally:
         if os.path.exists(tmp_name):
@@ -212,12 +353,16 @@ def normalized_url(url: str) -> tuple[str, str, str, str]:
     )
 
 
+def same_url(left: str, right: str) -> bool:
+    return bool(left and right and normalized_url(left) == normalized_url(right))
+
+
 def is_valid_kiosk_url(target_url: str, presentation_url: str, offline_url: str) -> str | None:
     if not target_url:
         return None
-    if offline_url and normalized_url(target_url) == normalized_url(offline_url):
+    if offline_url and same_url(target_url, offline_url):
         return "offline"
-    if presentation_url and normalized_url(target_url) == normalized_url(presentation_url):
+    if presentation_url and same_url(target_url, presentation_url):
         return "presentation"
 
     target_slides_id = parse_google_slides_id(target_url)
@@ -297,22 +442,27 @@ def fetch_targets(config: HealthConfig) -> list[dict[str, Any]]:
     return data
 
 
-def find_valid_page(targets: list[dict[str, Any]], config: HealthConfig) -> str | None:
+def find_valid_page(targets: list[dict[str, Any]], config: HealthConfig) -> tuple[str | None, str, str]:
     saw_page = False
+    first_page_url = ""
+    first_websocket_url = ""
     for target in targets:
         if target.get("type") != "page":
             continue
         saw_page = True
         target_url = str(target.get("url", "")).strip()
         websocket_url = str(target.get("webSocketDebuggerUrl", "")).strip()
+        if not first_page_url:
+            first_page_url = target_url
+            first_websocket_url = websocket_url
         if not target_url or not websocket_url:
             continue
-        page_type = is_valid_kiosk_url(target_url, config.presentation_url, config.offline_url)
+        page_type = is_valid_kiosk_url(target_url, config.presentation_url, config.offline_page_url)
         if page_type:
-            return page_type
+            return page_type, target_url, websocket_url
     if not saw_page:
         raise RuntimeError("geen Chromium page-target gevonden")
-    return None
+    return None, first_page_url, first_websocket_url
 
 
 def evaluate_health(config: HealthConfig, simulate_debug_failure: bool = False) -> CheckResult:
@@ -346,13 +496,72 @@ def evaluate_health(config: HealthConfig, simulate_debug_failure: bool = False) 
         return CheckResult(False, "warning" if startup_grace else "failed", service=service_state, pid=pid, debug_port="failed", reason="debug_port_unreachable", startup_grace=startup_grace)
 
     try:
-        page = find_valid_page(targets, config)
+        page, page_url, websocket_url = find_valid_page(targets, config)
     except RuntimeError as exc:
         return CheckResult(False, "warning" if startup_grace else "failed", service=service_state, pid=pid, debug_port="ok", reason=str(exc).replace(" ", "_"), startup_grace=startup_grace)
     if page is None:
-        return CheckResult(False, "warning" if startup_grace else "failed", service=service_state, pid=pid, debug_port="ok", reason="no_valid_kiosk_page", startup_grace=startup_grace)
+        return CheckResult(False, "warning" if startup_grace else "failed", service=service_state, pid=pid, debug_port="ok", page_url=page_url, websocket_url=websocket_url, reason="no_valid_kiosk_page", startup_grace=startup_grace)
 
-    return CheckResult(True, "ok", service=service_state, pid=pid, debug_port="ok", page=page)
+    return CheckResult(True, "ok", service=service_state, pid=pid, debug_port="ok", page=page, page_url=page_url, websocket_url=websocket_url)
+
+
+def check_networkmanager() -> tuple[bool, str, str]:
+    try:
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "CONNECTIVITY", "general"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False, "failed", "networkmanager_failed"
+    if result.returncode != 0:
+        return False, "failed", "networkmanager_failed"
+    status = (result.stdout.splitlines()[0] if result.stdout.splitlines() else "unknown").strip().lower()
+    if status == "full":
+        return True, "full", "none"
+    if status in {"limited", "portal", "none", "unknown"}:
+        return False, status, f"networkmanager_{status}"
+    return False, "unknown", "networkmanager_unknown"
+
+
+def check_http(config: HealthConfig) -> tuple[bool, str, str]:
+    try:
+        result = subprocess.run(
+            [
+                "curl",
+                "--silent",
+                "--show-error",
+                "--fail",
+                "--max-time",
+                str(config.connectivity_timeout_seconds),
+                "--output",
+                "/dev/null",
+                config.connectivity_check_url,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=config.connectivity_timeout_seconds + 2,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "timeout", "http_timeout"
+    except OSError:
+        return False, "failed", "http_failed"
+    if result.returncode == 0:
+        return True, "ok", "none"
+    if result.returncode == 28:
+        return False, "timeout", "http_timeout"
+    return False, "failed", "http_failed"
+
+
+def evaluate_connectivity(config: HealthConfig) -> ConnectivityResult:
+    nm_ok, nm_status, nm_reason = check_networkmanager()
+    http_ok, http_status, http_reason = check_http(config)
+    online = nm_ok and http_ok
+    reason = "none" if online else (nm_reason if not nm_ok else http_reason)
+    return ConnectivityResult(online, "online" if online else "offline", nm_status, http_status, reason)
 
 
 def can_restart(state: dict[str, Any], config: HealthConfig, reference_time: datetime) -> bool:
@@ -377,6 +586,120 @@ def restart_kiosk() -> tuple[bool, str]:
     if result.returncode == 0:
         return True, message
     return False, message or f"systemctl exitcode {result.returncode}"
+
+
+def navigate_page(websocket_url: str, target_url: str) -> tuple[bool, str]:
+    if not websocket_url:
+        return False, "webSocketDebuggerUrl ontbreekt"
+    if websocket is None:
+        return False, f"Pythonpakket websocket ontbreekt: {WEBSOCKET_IMPORT_ERROR}"
+
+    ws = None
+    try:
+        ws = websocket.create_connection(websocket_url, timeout=5)
+        ws.send(json.dumps({"id": 1, "method": "Page.navigate", "params": {"url": target_url}}))
+        response = json.loads(ws.recv())
+        if response.get("id") != 1:
+            return False, "onverwachte response van Chromium DevTools"
+        if "error" in response:
+            return False, f"Chromium DevTools gaf een fout: {response['error']}"
+    except (OSError, websocket.WebSocketException, json.JSONDecodeError) as exc:
+        return False, f"navigatie via Chromium DevTools mislukt: {exc}"
+    finally:
+        if ws is not None:
+            ws.close()
+    return True, "ok"
+
+
+def navigate_if_needed(result: CheckResult, target_url: str) -> tuple[bool, str]:
+    if same_url(result.page_url, target_url):
+        return True, "already_visible"
+    return navigate_page(result.websocket_url, target_url)
+
+
+def process_connectivity(
+    state: dict[str, Any],
+    connectivity: ConnectivityResult,
+    browser: CheckResult,
+    config: HealthConfig,
+    reference_timestamp: int,
+    allow_navigation: bool,
+) -> ConnectivityAction:
+    state = dict(state)
+    offline_since = valid_unix_timestamp(state.get("OFFLINE_SINCE", 0), reference_timestamp)
+    online_since = valid_unix_timestamp(state.get("ONLINE_SINCE", 0), reference_timestamp)
+
+    if not connectivity.online:
+        if offline_since == 0:
+            offline_since = reference_timestamp
+        state.update({
+            "STATUS": "offline",
+            "OFFLINE_SINCE": offline_since,
+            "ONLINE_SINCE": 0,
+            "OFFLINE_PAGE_SHOWN": bool(state.get("OFFLINE_PAGE_SHOWN", False)),
+        })
+        if not config.offline_page_enabled:
+            return ConnectivityAction(state, "keep_current_page", "offline_page_disabled")
+        offline_duration = max(0, reference_timestamp - offline_since)
+        if offline_duration < config.offline_after_seconds:
+            return ConnectivityAction(state, "keep_current_page", "offline_grace_period")
+        if bool(state.get("OFFLINE_PAGE_SHOWN", False)) and same_url(browser.page_url, config.offline_page_url):
+            return ConnectivityAction(state, "none", "offline_page_already_visible")
+        if not allow_navigation or not browser.ok:
+            return ConnectivityAction(state, "show_offline_page", "offline_threshold_reached")
+        navigation_ok, navigation_reason = navigate_if_needed(browser, config.offline_page_url)
+        if navigation_ok:
+            state["OFFLINE_PAGE_SHOWN"] = True
+            if navigation_reason == "already_visible":
+                return ConnectivityAction(state, "none", "offline_page_already_visible")
+            return ConnectivityAction(state, "show_offline_page", "offline_threshold_reached")
+        return ConnectivityAction(state, "navigation_failed", "offline_navigation_failed")
+
+    if offline_since == 0 and not bool(state.get("OFFLINE_PAGE_SHOWN", False)) and online_since == 0:
+        state.update({
+            "STATUS": "online",
+            "OFFLINE_SINCE": 0,
+            "ONLINE_SINCE": 0,
+            "OFFLINE_PAGE_SHOWN": False,
+        })
+        return ConnectivityAction(state, "none", "none")
+
+    if online_since == 0:
+        online_since = reference_timestamp
+        state.update({
+            "STATUS": "offline",
+            "OFFLINE_SINCE": offline_since,
+            "ONLINE_SINCE": online_since,
+            "OFFLINE_PAGE_SHOWN": bool(state.get("OFFLINE_PAGE_SHOWN", False)),
+        })
+        return ConnectivityAction(state, "wait_online_confirmation", "connectivity_recovering")
+
+    online_duration = max(0, reference_timestamp - online_since)
+    if online_duration < config.online_confirm_seconds:
+        state.update({
+            "STATUS": "offline",
+            "OFFLINE_SINCE": offline_since,
+            "ONLINE_SINCE": online_since,
+            "OFFLINE_PAGE_SHOWN": bool(state.get("OFFLINE_PAGE_SHOWN", False)),
+        })
+        return ConnectivityAction(state, "wait_online_confirmation", "connectivity_recovering")
+
+    reset_state = {
+        "STATUS": "online",
+        "OFFLINE_SINCE": 0,
+        "ONLINE_SINCE": 0,
+        "OFFLINE_PAGE_SHOWN": False,
+    }
+    if same_url(browser.page_url, config.presentation_url):
+        return ConnectivityAction(reset_state, "none", "kiosk_page_already_visible")
+    if not allow_navigation or not browser.ok:
+        return ConnectivityAction(state, "show_kiosk_page", "connectivity_restored")
+    navigation_ok, navigation_reason = navigate_if_needed(browser, config.presentation_url)
+    if navigation_ok:
+        if navigation_reason == "already_visible":
+            return ConnectivityAction(reset_state, "none", "kiosk_page_already_visible")
+        return ConnectivityAction(reset_state, "show_kiosk_page", "connectivity_restored")
+    return ConnectivityAction(state, "navigation_failed", "kiosk_navigation_failed")
 
 
 def parse_log_time(line: str) -> datetime | None:
@@ -462,10 +785,21 @@ def apply_result(
     return state, action, restart_skipped, exitcode
 
 
-def log_line(reference_time: datetime, result: CheckResult, failures: int, action: str, restart_skipped: str | None) -> str:
+def log_line(
+    reference_time: datetime,
+    result: CheckResult,
+    connectivity: ConnectivityResult,
+    failures: int,
+    action: str,
+    restart_skipped: str | None,
+    reason: str,
+) -> str:
+    health_value = result.health
+    if result.ok and not connectivity.online:
+        health_value = "warning"
     parts = [
         reference_time.isoformat(timespec="seconds"),
-        f"health={result.health}",
+        f"health={health_value}",
     ]
     if result.startup_grace:
         parts.append("startup_grace=true")
@@ -474,10 +808,15 @@ def log_line(reference_time: datetime, result: CheckResult, failures: int, actio
         f"pid={result.pid}",
         f"debug_port={result.debug_port}",
         f"page={result.page}",
+        f"network={connectivity.status}",
+        f"nm={connectivity.nm}",
+        f"http={connectivity.http}",
         f"failures={failures}",
         f"action={action if action != 'restart_failed' else 'restart'}",
-        f"reason={result.reason}",
+        f"reason={reason}",
     ])
+    if connectivity.reason != "none" and connectivity.reason != reason:
+        parts.append(f"network_reason={connectivity.reason}")
     if restart_skipped:
         parts.append(f"restart_skipped={restart_skipped}")
     return " ".join(parts)
@@ -488,6 +827,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--check-only", action="store_true", help="Controleer zonder herstelactie uit te voeren.")
     parser.add_argument("--simulate-debug-failure", action="store_true", help="Simuleer een debugpoortfout zonder restart.")
     parser.add_argument("--state-dir", type=Path, default=None, help="Alternatieve statusmap voor tests.")
+    parser.add_argument("--connectivity-only", action="store_true", help="Alleen connectiviteit verwerken, zonder browsernavigatie.")
     return parser.parse_args(argv)
 
 
@@ -508,19 +848,36 @@ def main(argv: list[str] | None = None) -> int:
 
     state_dir.mkdir(parents=True, exist_ok=True)
     state_file = state_dir / "health-state.json"
+    connectivity_file = state_dir / "connectivity.state"
     log_file = state_dir / "health.log"
     state, warning = load_state(state_file)
     if warning:
         print(f"Waarschuwing: {warning}", file=sys.stderr)
-
     reference_time = now()
+    reference_timestamp = int(reference_time.timestamp())
+    connectivity_state, connectivity_warning = load_connectivity_state(connectivity_file, reference_timestamp)
+    if connectivity_warning:
+        print(f"Waarschuwing: {connectivity_warning}", file=sys.stderr)
+    for config_warning in config.warnings:
+        print(f"Waarschuwing: {config_warning}", file=sys.stderr)
+
     result = evaluate_health(config, simulate_debug_failure=args.simulate_debug_failure)
+    connectivity = evaluate_connectivity(config)
     if result.startup_grace and not result.ok:
         print(f"Waarschuwing: kiosk zit in startup-grace; geen herstelactie voor {result.reason}", file=sys.stderr)
     elif not result.ok:
         print(f"Fout: health-check faalt: {result.reason}", file=sys.stderr)
 
-    new_state, action, restart_skipped, exitcode = apply_result(
+    connectivity_action = process_connectivity(
+        connectivity_state,
+        connectivity,
+        result,
+        config,
+        reference_timestamp,
+        allow_navigation=not (args.check_only or args.simulate_debug_failure or args.connectivity_only),
+    )
+
+    new_state, browser_action, restart_skipped, exitcode = apply_result(
         state,
         result,
         config,
@@ -528,7 +885,11 @@ def main(argv: list[str] | None = None) -> int:
         reference_time=reference_time,
     )
     atomic_write_json(state_file, new_state)
-    line = log_line(reference_time, result, int(new_state.get("consecutive_failures", 0)), action, restart_skipped)
+    atomic_write_connectivity_state(connectivity_file, connectivity_action.state)
+
+    action = browser_action if browser_action != "none" else connectivity_action.action
+    reason = result.reason if browser_action != "none" or not result.ok else connectivity_action.reason
+    line = log_line(reference_time, result, connectivity, int(new_state.get("consecutive_failures", 0)), action, restart_skipped, reason)
     write_log_line(log_file, config, line, reference_time)
     print(line)
     return exitcode

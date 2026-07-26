@@ -3,6 +3,12 @@
 
 PRESENTATION_URL="https://docs.google.com/presentation/d/1cUJkZT8T8xVz6g9N_PrCgHIF7wcKQy1bIRtCutK9z5E/present?start=true&loop=true&delayms=5000"
 OFFLINE_URL="file:///opt/digitalsignage/web/offline/index.html"
+OFFLINE_PAGE_ENABLED=true
+OFFLINE_AFTER_SECONDS=300
+ONLINE_CONFIRM_SECONDS=30
+CONNECTIVITY_CHECK_URL="https://clients3.google.com/generate_204"
+CONNECTIVITY_TIMEOUT_SECONDS=8
+OFFLINE_PAGE_URL="file:///opt/digitalsignage/offline/index.html"
 CHROMIUM_BIN="/usr/bin/chromium"
 WAYLAND_DISPLAY="wayland-0"
 CHROMIUM_PROFILE_DIR=".local/share/digitalsignage/chromium-profile"
