@@ -14,6 +14,9 @@ CONFIG_DEFAULTS=(
   "HEALTH_STARTUP_GRACE_SECONDS=90"
   "HEALTH_LOG_RETENTION_DAYS=3"
   "HEALTH_LOG_MAX_BYTES=5242880"
+  "DESKTOP_BACKGROUND_ENABLED=true"
+  "DESKTOP_BACKGROUND_FILE=\"/opt/digitalsignage/assets/wallpapers/digitalsignage-background.png\""
+  "DESKTOP_BACKGROUND_MODE=zoom"
 )
 
 active_config_has_key() {
@@ -113,7 +116,16 @@ install_project_files() {
   while IFS= read -r -d '' script_file; do
     install -m 0755 "${script_file}" "${INSTALL_DIR}/scripts/$(basename "${script_file}")"
   done < <(find "${PROJECT_ROOT}/scripts" -maxdepth 1 -type f -print0)
+  install -d -m 0755 "${INSTALL_DIR}/assets/wallpapers"
+  install -m 0644 "${PROJECT_ROOT}/assets/wallpapers/digitalsignage-background.png" "${INSTALL_DIR}/assets/wallpapers/digitalsignage-background.png"
   cp -R "${PROJECT_ROOT}/web" "${INSTALL_DIR}/"
+}
+
+configure_desktop_background() {
+  # De desktopachtergrond wordt bij upgrade opnieuw idempotent gezet voordat
+  # user-services herladen. Zo krijgt een oudere installatie de visuele fallback
+  # zonder kiosk-, refresh- of healthlogica te wijzigen.
+  "${INSTALL_DIR}/scripts/configure-desktop-background.sh"
 }
 
 refresh_interval() {
@@ -163,6 +175,7 @@ EOF
 
 mkdir -p "${INSTALL_DIR}"
 install_project_files
+configure_desktop_background
 
 passwd_entry="$(getent passwd "${KIOSK_USER}" || true)"
 if [ -z "${passwd_entry}" ]; then

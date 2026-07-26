@@ -111,7 +111,16 @@ install_project_files() {
   while IFS= read -r -d '' script_file; do
     install -m 0755 "${script_file}" "${INSTALL_DIR}/scripts/$(basename "${script_file}")"
   done < <(find "${PROJECT_ROOT}/scripts" -maxdepth 1 -type f -print0)
+  install -d -m 0755 "${INSTALL_DIR}/assets/wallpapers"
+  install -m 0644 "${PROJECT_ROOT}/assets/wallpapers/digitalsignage-background.png" "${INSTALL_DIR}/assets/wallpapers/digitalsignage-background.png"
   cp -R "${PROJECT_ROOT}/web" "${INSTALL_DIR}/"
+}
+
+configure_desktop_background() {
+  # De desktopachtergrond wordt ingesteld voordat services starten. Daardoor is
+  # de vaste achtergrond al beschikbaar wanneer Chromium later opstart of kort
+  # opnieuw start.
+  "${INSTALL_DIR}/scripts/configure-desktop-background.sh"
 }
 
 install_user_units() {
@@ -190,6 +199,7 @@ if [ ! -f "${CONFIG_FILE}" ]; then
 fi
 
 load_config
+configure_desktop_background
 install_user_units
 
 systemctl daemon-reload

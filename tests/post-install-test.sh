@@ -136,7 +136,7 @@ test_user_and_config() {
 test_install_paths() {
   local failed=0
   local path
-  for path in /opt/digitalsignage /etc/digitalsignage/digitalsignage.conf /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py /opt/digitalsignage/scripts/health-check.py; do
+  for path in /opt/digitalsignage /etc/digitalsignage/digitalsignage.conf /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py /opt/digitalsignage/scripts/health-check.py /opt/digitalsignage/scripts/configure-desktop-background.sh /opt/digitalsignage/assets/wallpapers/digitalsignage-background.png; do
     if [ -e "${path}" ]; then
       log_ok "Installatiepad bestaat: ${path}"
     else
@@ -145,7 +145,7 @@ test_install_paths() {
     fi
   done
 
-  for path in /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py /opt/digitalsignage/scripts/health-check.py /opt/digitalsignage/scripts/health-check.sh /opt/digitalsignage/scripts/refresh-kiosk.sh /opt/digitalsignage/scripts/restart-chromium.sh /opt/digitalsignage/scripts/show-network-info.sh /opt/digitalsignage/scripts/check-network.sh; do
+  for path in /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py /opt/digitalsignage/scripts/health-check.py /opt/digitalsignage/scripts/configure-desktop-background.sh /opt/digitalsignage/scripts/health-check.sh /opt/digitalsignage/scripts/refresh-kiosk.sh /opt/digitalsignage/scripts/restart-chromium.sh /opt/digitalsignage/scripts/show-network-info.sh /opt/digitalsignage/scripts/check-network.sh; do
     if [ -x "${path}" ]; then
       log_ok "Script is uitvoerbaar: ${path}"
     else
@@ -158,6 +158,37 @@ test_install_paths() {
       [ "${mode}" = "755" ] && log_ok "Scriptmodus is 0755: ${path}" || { log_error "Scriptmodus is ${mode}, verwacht 0755: ${path}"; failed=1; }
     fi
   done
+
+  if [ -e /opt/digitalsignage/assets/wallpapers/digitalsignage-background.png ]; then
+    local wallpaper_mode
+    wallpaper_mode="$(stat -c '%a' /opt/digitalsignage/assets/wallpapers/digitalsignage-background.png)"
+    [ "${wallpaper_mode}" = "644" ] && log_ok "Desktopachtergrondmodus is 0644" || { log_error "Desktopachtergrondmodus is ${wallpaper_mode}, verwacht 644"; failed=1; }
+  fi
+  return "${failed}"
+}
+
+test_desktop_background() {
+  local failed=0
+  local enabled background_file mode desktop_config
+
+  enabled="$(read_config_value DESKTOP_BACKGROUND_ENABLED "${CONFIG_FILE}")"
+  background_file="$(read_config_value DESKTOP_BACKGROUND_FILE "${CONFIG_FILE}")"
+  mode="$(read_config_value DESKTOP_BACKGROUND_MODE "${CONFIG_FILE}")"
+  desktop_config="${KIOSK_HOME}/.config/pcmanfm/LXDE-pi/desktop-items-0.conf"
+
+  [ "${enabled}" = "true" ] && log_ok "Desktopachtergrond staat standaard aan" || { log_error "DESKTOP_BACKGROUND_ENABLED is ${enabled:-leeg}"; failed=1; }
+  [ "${background_file}" = "/opt/digitalsignage/assets/wallpapers/digitalsignage-background.png" ] && log_ok "Desktopachtergrondpad correct" || { log_error "DESKTOP_BACKGROUND_FILE is ${background_file:-leeg}"; failed=1; }
+  [ "${mode}" = "zoom" ] && log_ok "Desktopachtergrondmodus correct" || { log_error "DESKTOP_BACKGROUND_MODE is ${mode:-leeg}"; failed=1; }
+
+  if [ -f "${desktop_config}" ]; then
+    log_ok "pcmanfm-desktopconfiguratie bestaat: ${desktop_config}"
+    grep -F "wallpaper=${background_file}" "${desktop_config}" >/dev/null && log_ok "Desktopconfiguratie verwijst naar projectachtergrond" || { log_error "Desktopconfiguratie verwijst niet naar projectachtergrond"; failed=1; }
+    grep -F "wallpaper_mode=crop" "${desktop_config}" >/dev/null && log_ok "Desktopconfiguratie gebruikt crop voor zoom" || { log_error "Desktopconfiguratie mist wallpaper_mode=crop"; failed=1; }
+  else
+    log_error "pcmanfm-desktopconfiguratie ontbreekt: ${desktop_config}"
+    failed=1
+  fi
+
   return "${failed}"
 }
 
@@ -459,6 +490,7 @@ test_journals() {
 
 run_test "Gebruiker en configuratie" test_user_and_config
 run_test "Installatiepaden" test_install_paths
+run_test "Desktopachtergrond" test_desktop_background
 run_test "Statusmap" test_status_directory
 run_test "User-systemd" test_user_systemd
 run_test "Chromium" test_chromium

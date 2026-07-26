@@ -23,3 +23,8 @@ HEALTH_HTTP_TIMEOUT_SECONDS=5
 HEALTH_STARTUP_GRACE_SECONDS=90
 HEALTH_LOG_RETENTION_DAYS=3
 HEALTH_LOG_MAX_BYTES=5242880
+
+# Desktopachtergrond die zichtbaar blijft wanneer Chromium nog niet actief is.
+DESKTOP_BACKGROUND_ENABLED=true
+DESKTOP_BACKGROUND_FILE="/opt/digitalsignage/assets/wallpapers/digitalsignage-background.png"
+DESKTOP_BACKGROUND_MODE=zoom

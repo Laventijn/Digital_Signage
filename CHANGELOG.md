@@ -23,3 +23,4 @@ Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 - Fase 2-stabiliteitswerk gestart: Python-cache uit Git, testlogrechten gecontroleerd, user-journalfallback toegevoegd en standaard presentatie-refresh naar vijf minuten verlaagd.
 - Losse documentatienotities samengevoegd in de genummerde documentatie.
 - Fase 2B toegevoegd: automatische user-level health-check met failure threshold, startup-grace, restart-cooldown, `health.log` en `health-state.json`.
+- Fase 2C toegevoegd: vaste Digital Signage-desktopachtergrond via pcmanfm-configuratie, inclusief installatie-, upgrade-, uninstall- en testdekking.
