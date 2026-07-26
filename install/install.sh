@@ -100,8 +100,8 @@ write_health_timer_dropin() {
   install -d -m 0755 "${dropin_dir}"
   cat > "${dropin_dir}/interval.conf" <<EOF
 [Timer]
-OnUnitActiveSec=
-OnUnitInactiveSec=
+OnBootSec=
+OnActiveSec=2min
 OnUnitInactiveSec=${interval}s
 EOF
 }

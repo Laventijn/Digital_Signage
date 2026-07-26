@@ -76,8 +76,8 @@ if ! grep -q 'digitalsignage-health.timer.d' "${ROOT_DIR}/install/install.sh" ||
   exit 1
 fi
 
-if ! grep -q '^OnBootSec=2min$' "${ROOT_DIR}/services/digitalsignage-health.timer"; then
-  echo "Healthtimer mist OnBootSec=2min voor de eerste run na reboot." >&2
+if ! grep -q '^OnActiveSec=2min$' "${ROOT_DIR}/services/digitalsignage-health.timer"; then
+  echo "Healthtimer mist OnActiveSec=2min voor de eerste run na timerstart." >&2
   exit 1
 fi
 
@@ -93,11 +93,12 @@ fi
 
 for file in "${ROOT_DIR}/install/install.sh" "${ROOT_DIR}/install/upgrade.sh"; do
   health_dropin_body="$(awk '/^write_health_timer_dropin\(\)/,/^}/' "${file}")"
-  if ! printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitActiveSec=$' ||
-    ! printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitInactiveSec=$' ||
+  if ! printf '%s\n' "${health_dropin_body}" | grep -q '^OnBootSec=$' ||
+    ! printf '%s\n' "${health_dropin_body}" | grep -q '^OnActiveSec=2min$' ||
     ! printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitInactiveSec=${interval}s$' ||
-    printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitActiveSec=${interval}s$'; then
-    echo "${file} schrijft de healthtimer-drop-in niet correct met OnUnitInactiveSec." >&2
+    printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitActiveSec=' ||
+    printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitInactiveSec=$'; then
+    echo "${file} schrijft de healthtimer-drop-in niet correct met OnActiveSec en OnUnitInactiveSec." >&2
     exit 1
   fi
 done

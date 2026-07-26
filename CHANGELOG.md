@@ -24,4 +24,4 @@ Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 - Losse documentatienotities samengevoegd in de genummerde documentatie.
 - Fase 2B toegevoegd: automatische user-level health-check met failure threshold, startup-grace, restart-cooldown, `health.log` en `health-state.json`.
 - Fase 2C toegevoegd: vaste Digital Signage-desktopachtergrond via pcmanfm-configuratie, inclusief installatie-, upgrade-, uninstall- en testdekking.
-- Healthtimer aangepast naar `OnUnitInactiveSec` met drop-in-reset van oude `OnUnitActiveSec`, en desktopachtergrond wordt waar mogelijk direct via actieve PCManFM toegepast.
+- Healthtimer aangepast naar `OnActiveSec` plus `OnUnitInactiveSec`, en desktopachtergrond wordt waar mogelijk direct via actieve PCManFM toegepast.

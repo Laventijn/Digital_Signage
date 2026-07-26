@@ -254,11 +254,17 @@ test_user_systemd() {
   if [ -f "${health_dropin}" ]; then
     inactive_count="$(awk -F= '$1 == "OnUnitInactiveSec" && $2 != "" { count++ } END { print count + 0 }' "${health_dropin}")"
     active_count="$(awk -F= '$1 == "OnUnitActiveSec" && $2 != "" { count++ } END { print count + 0 }' "${health_dropin}")"
-    grep -q '^OnUnitActiveSec=$' "${health_dropin}" && log_ok "Healthtimer-drop-in reset oude OnUnitActiveSec" || { log_error "Healthtimer-drop-in reset OnUnitActiveSec niet"; failed=1; }
-    grep -q '^OnUnitInactiveSec=$' "${health_dropin}" && log_ok "Healthtimer-drop-in reset OnUnitInactiveSec" || { log_error "Healthtimer-drop-in reset OnUnitInactiveSec niet"; failed=1; }
+    grep -q '^OnBootSec=$' "${health_dropin}" && log_ok "Healthtimer-drop-in reset oude OnBootSec" || { log_error "Healthtimer-drop-in reset OnBootSec niet"; failed=1; }
+    grep -q '^OnActiveSec=2min$' "${health_dropin}" && log_ok "Healthtimer-drop-in bouwt OnActiveSec opnieuw op" || { log_error "Healthtimer-drop-in mist OnActiveSec=2min"; failed=1; }
     [ "${inactive_count}" = "1" ] && log_ok "Healthtimer-drop-in bevat exact een actieve OnUnitInactiveSec" || { log_error "Healthtimer-drop-in bevat ${inactive_count} actieve OnUnitInactiveSec-regels"; failed=1; }
     grep -q "^OnUnitInactiveSec=${health_seconds}s$" "${health_dropin}" && log_ok "Healthtimer-drop-in gebruikt HEALTH_CHECK_SECONDS=${health_seconds}" || { log_error "Healthtimer-drop-in gebruikt niet HEALTH_CHECK_SECONDS=${health_seconds}"; failed=1; }
     [ "${active_count}" = "0" ] && log_ok "Healthtimer-drop-in gebruikt geen actieve OnUnitActiveSec" || { log_error "Healthtimer-drop-in bevat actieve OnUnitActiveSec"; failed=1; }
+    if grep -q '^OnUnitActiveSec=$' "${health_dropin}" || grep -q '^OnUnitInactiveSec=$' "${health_dropin}"; then
+      log_error "Healthtimer-drop-in gebruikt nog een lege OnUnitActiveSec/OnUnitInactiveSec-reset"
+      failed=1
+    else
+      log_ok "Healthtimer-drop-in gebruikt geen lege OnUnitActiveSec/OnUnitInactiveSec-reset"
+    fi
   else
     log_error "Healthtimer-drop-in ontbreekt: ${health_dropin}"
     failed=1

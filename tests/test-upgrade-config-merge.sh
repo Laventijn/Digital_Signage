@@ -132,9 +132,10 @@ assert_contains '^DESKTOP_BACKGROUND_MODE=zoom$' "${commented_config}"
 [ "$(count_active_key DESKTOP_BACKGROUND_MODE "${commented_config}")" -eq 1 ]
 
 health_dropin_body="$(awk '/^write_health_timer_dropin\(\)/,/^}/' "${ROOT_DIR}/install/upgrade.sh")"
-printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitActiveSec=$'
-printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitInactiveSec=$'
+printf '%s\n' "${health_dropin_body}" | grep -q '^OnBootSec=$'
+printf '%s\n' "${health_dropin_body}" | grep -q '^OnActiveSec=2min$'
 printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitInactiveSec=${interval}s$'
-! printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitActiveSec=${interval}s$'
+! printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitActiveSec='
+! printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitInactiveSec=$'
 
 echo "Upgradeconfiguratie-merge OK."

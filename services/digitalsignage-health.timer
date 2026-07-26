@@ -2,7 +2,7 @@
 Description=Digital Signage health-check iedere minuut
 
 [Timer]
-OnBootSec=2min
+OnActiveSec=2min
 OnUnitInactiveSec=60s
 AccuracySec=5s
 Persistent=true
