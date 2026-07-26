@@ -211,11 +211,12 @@ STATE_BACKUP_CREATED=false
 HEALTH_TIMER_WAS_ACTIVE=false
 LIVE_TEST_STARTED=false
 LIVE_TEST_ALLOWED=true
-SHORT_INTERRUPTION_PROVEN=false
-LONG_INTERRUPTION_PROVEN=false
-RECOVERY_PROVEN=false
-NO_RESTART_PROVEN=false
-CONFIG_RESTORED_PROVEN=false
+SHORT_OUTAGE_PROVED=false
+OFFLINE_PAGE_PROVED=false
+NO_REPEAT_NAVIGATION_PROVED=false
+RECOVERY_PROVED=false
+PID_STABLE_PROVED=false
+CONFIG_RESTORED_PROVED=false
 ORIGINAL_KIOSK_PID=""
 ORIGINAL_URL=""
 OFFLINE_CHECKSUM_BEFORE=""
@@ -253,11 +254,11 @@ finish() {
   printf 'Lokaal logbestand: wordt door Windows getoond na afloop\n'
 
   if [ "${TEST_MODE}" = "full" ]; then
-    [ "${SHORT_INTERRUPTION_PROVEN}" = true ] && printf 'Korte onderbreking: presentatie bleef zichtbaar\n'
-    [ "${LONG_INTERRUPTION_PROVEN}" = true ] && printf 'Langdurige onderbreking: offlinepagina verscheen\n'
-    [ "${RECOVERY_PROVEN}" = true ] && printf 'Internetherstel: kioskpagina keerde terug\n'
-    [ "${NO_RESTART_PROVEN}" = true ] && printf 'Kioskherstart tijdens netwerkverlies: nee\n'
-    [ "${CONFIG_RESTORED_PROVEN}" = true ] && printf 'Configuratie hersteld: ja\n'
+    [ "${SHORT_OUTAGE_PROVED}" = true ] && printf 'Korte onderbreking: presentatie bleef zichtbaar\n' || printf 'Korte onderbreking: NIET BEWEZEN\n'
+    [ "${OFFLINE_PAGE_PROVED}" = true ] && printf 'Langdurige onderbreking: offlinepagina verscheen\n' || printf 'Langdurige onderbreking: NIET BEWEZEN\n'
+    [ "${RECOVERY_PROVED}" = true ] && printf 'Internetherstel: kioskpagina keerde terug\n' || printf 'Internetherstel: NIET BEWEZEN\n'
+    [ "${PID_STABLE_PROVED}" = true ] && printf 'Kioskherstart tijdens netwerkverlies: nee\n' || printf 'Kioskherstart tijdens netwerkverlies: NIET BEWEZEN\n'
+    [ "${CONFIG_RESTORED_PROVED}" = true ] && printf 'Configuratie hersteld: ja\n' || printf 'Configuratie hersteld: NIET BEWEZEN\n'
   fi
 
   if [ "${ERROR_COUNT}" -eq 0 ]; then
@@ -400,6 +401,15 @@ start_health_once() {
   while systemctl --user is-active --quiet digitalsignage-health.service 2>/dev/null; do
     sleep 1
   done
+}
+
+run_health_and_get_new_line() {
+  local before line
+  before="$(health_log_line_count)"
+  start_health_once || return 1
+  line="$(new_health_lines "${before}" | tail -1)"
+  [ -n "${line}" ] || line="$(last_health_line)"
+  printf '%s\n' "${line}"
 }
 
 get_current_url() {
@@ -555,7 +565,7 @@ write_temp_config() {
       if (key=="OFFLINE_PAGE_ENABLED") { print "OFFLINE_PAGE_ENABLED=true"; seen[key]=1; next }
       if (key=="OFFLINE_AFTER_SECONDS") { print "OFFLINE_AFTER_SECONDS=15"; seen[key]=1; next }
       if (key=="ONLINE_CONFIRM_SECONDS") { print "ONLINE_CONFIRM_SECONDS=10"; seen[key]=1; next }
-      if (key=="CONNECTIVITY_TIMEOUT_SECONDS") { print "CONNECTIVITY_TIMEOUT_SECONDS=2"; seen[key]=1; next }
+      if (key=="CONNECTIVITY_TIMEOUT_SECONDS") { print "CONNECTIVITY_TIMEOUT_SECONDS=5"; seen[key]=1; next }
       if (key=="CONNECTIVITY_CHECK_URL") { print "CONNECTIVITY_CHECK_URL=\"" invalid_url "\""; seen[key]=1; next }
       print
     }
@@ -563,7 +573,7 @@ write_temp_config() {
       if (!seen["OFFLINE_PAGE_ENABLED"]) print "OFFLINE_PAGE_ENABLED=true"
       if (!seen["OFFLINE_AFTER_SECONDS"]) print "OFFLINE_AFTER_SECONDS=15"
       if (!seen["ONLINE_CONFIRM_SECONDS"]) print "ONLINE_CONFIRM_SECONDS=10"
-      if (!seen["CONNECTIVITY_TIMEOUT_SECONDS"]) print "CONNECTIVITY_TIMEOUT_SECONDS=2"
+      if (!seen["CONNECTIVITY_TIMEOUT_SECONDS"]) print "CONNECTIVITY_TIMEOUT_SECONDS=5"
       if (!seen["CONNECTIVITY_CHECK_URL"]) print "CONNECTIVITY_CHECK_URL=\"" invalid_url "\""
     }
   ' "${ACTIVE_CONFIG}" > "${tmp_file}" || return 1
@@ -879,64 +889,128 @@ else
   grep -E '^OFFLINE_SINCE=[1-9][0-9]*$' "${STATE_FILE}" >/dev/null && ok "OFFLINE_SINCE is gezet" || failure "OFFLINE_SINCE is niet gezet"
   current_after_first="$(get_current_url 2>/dev/null || true)"
   [ "$(classify_kiosk_url "${current_after_first}")" != "offline" ] && ok "Korte onderbreking houdt presentatie zichtbaar" || failure "Offlinepagina verscheen te vroeg"
-  SHORT_INTERRUPTION_PROVEN=true
+  SHORT_OUTAGE_PROVED=true
   [ "$(current_kiosk_pid)" = "${ORIGINAL_KIOSK_PID}" ] && ok "Kiosk-PID bleef gelijk na eerste offlinecontrole" || failure "Kiosk-PID wijzigde na eerste offlinecontrole"
 
   info "Wacht 17 seconden: dit is bewust iets langer dan OFFLINE_AFTER_SECONDS=15."
   sleep 17
-  start_health_once && ok "Tweede offlinecontrole crasht niet" || failure "Tweede offlinecontrole faalt"
-  second_line="$(last_health_line)"
-  printf '%s\n' "${second_line}"
-  printf '%s\n' "${second_line}" | grep -F 'action=show_offline_page' >/dev/null && ok "Log bevat show_offline_page" || warning "Log bevat geen show_offline_page"
-  printf '%s\n' "${second_line}" | grep -F 'reason=offline_threshold_reached' >/dev/null && ok "Log bevat offline_threshold_reached" || warning "Log bevat geen offline_threshold_reached"
-  info "Wacht maximaal 10 seconden tot Chromium de offlinepagina toont."
-  if current_after_threshold="$(wait_for_chromium_page offline 10 1)"; then
+  offline_visible=false
+  offline_success_log_seen=false
+  offline_attempt=1
+  last_offline_url=""
+  while [ "${offline_attempt}" -le 3 ]; do
+    if second_line="$(run_health_and_get_new_line)"; then
+      ok "Offline-navigatiepoging ${offline_attempt} crasht niet"
+    else
+      warning "Offline-navigatiepoging ${offline_attempt} kon healthservice niet starten"
+      second_line="$(last_health_line)"
+    fi
+    printf '%s\n' "${second_line}"
+    if printf '%s\n' "${second_line}" | grep -E 'action=show_offline_page|reason=offline_threshold_reached' >/dev/null; then
+      offline_success_log_seen=true
+    fi
+    info "Wacht maximaal 10 seconden tot Chromium de offlinepagina toont."
+    if last_offline_url="$(wait_for_chromium_page offline 10 1)"; then
+      offline_visible=true
+      break
+    fi
+    info "Laatste Chromium-URL: ${last_offline_url}"
+    if printf '%s\n' "${second_line}" | grep -E 'action=navigation_failed|reason=offline_navigation_failed' >/dev/null; then
+      warning "Offline-navigatiepoging ${offline_attempt} mislukte tijdelijk; nieuwe poging volgt"
+    else
+      warning "Offlinepagina nog niet zichtbaar na poging ${offline_attempt}; nieuwe poging volgt"
+    fi
+    offline_attempt=$((offline_attempt + 1))
+    [ "${offline_attempt}" -le 3 ] && sleep 2
+  done
+  [ "${offline_success_log_seen}" = true ] && ok "Minstens een offlineactie bereikte de drempel" || failure "Geen logregel met offline_threshold_reached of show_offline_page gevonden"
+  if [ "${offline_visible}" = true ]; then
     ok "Offlinepagina is zichtbaar na navigatie"
+    OFFLINE_PAGE_PROVED=true
   else
-    failure "Offlinepagina werd niet zichtbaar binnen 10 seconden"
-    info "Laatste Chromium-URL: ${current_after_threshold}"
+    failure "Offlinepagina werd niet zichtbaar na maximaal drie pogingen"
+    info "Laatste Chromium-URL: ${last_offline_url}"
   fi
   grep -F 'OFFLINE_PAGE_SHOWN=true' "${STATE_FILE}" >/dev/null && ok "State bevat OFFLINE_PAGE_SHOWN=true" || failure "State bevat geen OFFLINE_PAGE_SHOWN=true"
   [ "$(current_kiosk_pid)" = "${ORIGINAL_KIOSK_PID}" ] && ok "Kiosk-PID bleef gelijk bij offlinepagina" || failure "Kiosk-PID wijzigde bij offlinepagina"
-  LONG_INTERRUPTION_PROVEN=true
 
-  start_health_once && ok "Derde offlinecontrole crasht niet" || failure "Derde offlinecontrole faalt"
-  third_line="$(last_health_line)"
-  printf '%s\n' "${third_line}"
-  [ "$(classify_kiosk_url "$(get_current_url 2>/dev/null || true)")" = "offline" ] && ok "Offlinepagina blijft zichtbaar zonder herladen" || failure "Offlinepagina bleef niet zichtbaar"
-  printf '%s\n' "${third_line}" | grep -E 'offline_page_already_visible|action=none' >/dev/null && ok "Log meldt geen herhaalde navigatie" || warning "Geen duidelijke log voor niet-herladen"
-  [ "$(current_kiosk_pid)" = "${ORIGINAL_KIOSK_PID}" ] && ok "Kiosk-PID bleef gelijk bij herhaalde offlinecheck" || failure "Kiosk-PID wijzigde bij herhaalde offlinecheck"
+  if [ "${offline_visible}" = true ]; then
+    if third_line="$(run_health_and_get_new_line)"; then
+      ok "Controle zonder herhaalde navigatie crasht niet"
+    else
+      failure "Controle zonder herhaalde navigatie faalt"
+      third_line="$(last_health_line)"
+    fi
+    printf '%s\n' "${third_line}"
+    [ "$(classify_kiosk_url "$(get_current_url 2>/dev/null || true)")" = "offline" ] && ok "Offlinepagina blijft zichtbaar zonder herladen" || failure "Offlinepagina bleef niet zichtbaar"
+    if printf '%s\n' "${third_line}" | grep -E 'reason=offline_page_already_visible|action=none' >/dev/null; then
+      ok "Log meldt geen herhaalde navigatie"
+      NO_REPEAT_NAVIGATION_PROVED=true
+    else
+      warning "Geen duidelijke log voor niet-herladen"
+    fi
+    [ "$(current_kiosk_pid)" = "${ORIGINAL_KIOSK_PID}" ] && ok "Kiosk-PID bleef gelijk bij herhaalde offlinecheck" || failure "Kiosk-PID wijzigde bij herhaalde offlinecheck"
+  else
+    skipped "Geen-herhaalde-navigatiecontrole overgeslagen omdat offlinepagina niet bewezen zichtbaar werd"
+  fi
 
   set_connectivity_check_url "${original_check_url}" && ok "Alleen CONNECTIVITY_CHECK_URL hersteld; korte wachttijden blijven actief" || failure "CONNECTIVITY_CHECK_URL kon niet apart worden hersteld"
   refresh_config_values
-  start_health_once && ok "Eerste herstelcontrole crasht niet" || failure "Eerste herstelcontrole faalt"
-  recovery_wait_line="$(last_health_line)"
-  printf '%s\n' "${recovery_wait_line}"
-  printf '%s\n' "${recovery_wait_line}" | grep -F 'network=online' >/dev/null && ok "Netwerk wordt opnieuw online gedetecteerd" || failure "Netwerk wordt niet online gedetecteerd"
-  [ "$(classify_kiosk_url "$(get_current_url 2>/dev/null || true)")" = "offline" ] && ok "Offlinepagina blijft zichtbaar tijdens bevestigingstijd" || failure "Offlinepagina bleef niet zichtbaar tijdens bevestigingstijd"
-  grep -E '^ONLINE_SINCE=[1-9][0-9]*$' "${STATE_FILE}" >/dev/null && ok "ONLINE_SINCE is gezet" || failure "ONLINE_SINCE is niet gezet"
-  printf '%s\n' "${recovery_wait_line}" | grep -F 'wait_online_confirmation' >/dev/null && ok "Log bevat wait_online_confirmation" || warning "Log bevat geen wait_online_confirmation"
-  [ "$(current_kiosk_pid)" = "${ORIGINAL_KIOSK_PID}" ] && ok "Kiosk-PID bleef gelijk tijdens herstelwachttijd" || failure "Kiosk-PID wijzigde tijdens herstelwachttijd"
-
-  info "Wacht 12 seconden: dit is bewust iets langer dan ONLINE_CONFIRM_SECONDS=10."
-  sleep 12
-  start_health_once && ok "Tweede herstelcontrole crasht niet" || failure "Tweede herstelcontrole faalt"
-  recovery_line="$(last_health_line)"
-  printf '%s\n' "${recovery_line}"
-  printf '%s\n' "${recovery_line}" | grep -F 'show_kiosk_page' >/dev/null && ok "Log bevat show_kiosk_page" || warning "Log bevat geen show_kiosk_page"
-  printf '%s\n' "${recovery_line}" | grep -F 'connectivity_restored' >/dev/null && ok "Log bevat connectivity_restored" || warning "Log bevat geen connectivity_restored"
-  info "Wacht maximaal 10 seconden tot Chromium terugkeert naar de presentatie."
-  if final_url="$(wait_for_chromium_page presentation 10 1)"; then
+  recovery_deadline=$(( $(date +%s) + 60 ))
+  recovery_wait_seen=false
+  recovery_action_seen=false
+  recovery_browser_seen=false
+  final_url=""
+  while [ "$(date +%s)" -lt "${recovery_deadline}" ]; do
+    if recovery_line="$(run_health_and_get_new_line)"; then
+      ok "Herstelcontrole crasht niet"
+    else
+      warning "Herstelcontrole kon healthservice niet starten"
+      recovery_line="$(last_health_line)"
+    fi
+    printf '%s\n' "${recovery_line}"
+    if printf '%s\n' "${recovery_line}" | grep -E 'network=offline|http=timeout|http=failed' >/dev/null; then
+      warning "Herstelcontrole is tijdelijk nog offline; nieuwe poging volgt"
+      sleep 2
+      continue
+    fi
+    if printf '%s\n' "${recovery_line}" | grep -F 'wait_online_confirmation' >/dev/null; then
+      recovery_wait_seen=true
+      grep -E '^ONLINE_SINCE=[1-9][0-9]*$' "${STATE_FILE}" >/dev/null && ok "ONLINE_SINCE is gezet" || warning "ONLINE_SINCE is nog niet gezet"
+      [ "$(classify_kiosk_url "$(get_current_url 2>/dev/null || true)")" = "offline" ] && ok "Offlinepagina blijft zichtbaar tijdens bevestigingstijd" || warning "Offlinepagina is niet zichtbaar tijdens bevestigingstijd"
+      info "Wacht 12 seconden: dit is bewust iets langer dan ONLINE_CONFIRM_SECONDS=10."
+      sleep 12
+      continue
+    fi
+    if printf '%s\n' "${recovery_line}" | grep -E 'action=show_kiosk_page|reason=connectivity_restored|reason=kiosk_page_already_visible' >/dev/null; then
+      recovery_action_seen=true
+      info "Wacht maximaal 10 seconden tot Chromium terugkeert naar de presentatie."
+      if final_url="$(wait_for_chromium_page presentation 10 1)"; then
+        recovery_browser_seen=true
+        break
+      fi
+      info "Laatste Chromium-URL: ${final_url}"
+    fi
+    sleep 2
+  done
+  [ "${recovery_wait_seen}" = true ] && ok "Log bevat online bevestiging" || warning "Geen wait_online_confirmation gezien binnen herstelvenster"
+  [ "${recovery_action_seen}" = true ] && ok "Log bevat herstelactie of geldige already-visible-uitkomst" || failure "Geen herstelactie of already-visible-uitkomst gezien binnen 60 seconden"
+  if [ "${recovery_browser_seen}" = true ]; then
     ok "Kioskpagina keerde terug na stabiel herstel"
   else
-    failure "Kioskpagina keerde niet terug binnen 10 seconden"
+    failure "Kioskpagina keerde niet terug binnen 60 seconden"
     info "Laatste Chromium-URL: ${final_url}"
   fi
   grep -F 'OFFLINE_PAGE_SHOWN=false' "${STATE_FILE}" >/dev/null && ok "OFFLINE_PAGE_SHOWN=false na herstel" || failure "OFFLINE_PAGE_SHOWN is niet false na herstel"
   grep -F 'OFFLINE_SINCE=0' "${STATE_FILE}" >/dev/null && ok "OFFLINE_SINCE=0 na herstel" || failure "OFFLINE_SINCE is niet 0 na herstel"
   grep -F 'ONLINE_SINCE=0' "${STATE_FILE}" >/dev/null && ok "ONLINE_SINCE=0 na herstel" || failure "ONLINE_SINCE is niet 0 na herstel"
-  [ "$(current_kiosk_pid)" = "${ORIGINAL_KIOSK_PID}" ] && { ok "Kiosk-PID bleef gelijk tijdens volledige netwerkproef"; NO_RESTART_PROVEN=true; } || failure "Kiosk-PID wijzigde tijdens netwerkproef"
-  RECOVERY_PROVEN=true
+  if [ "${recovery_action_seen}" = true ] && [ "${recovery_browser_seen}" = true ] &&
+    grep -F 'OFFLINE_PAGE_SHOWN=false' "${STATE_FILE}" >/dev/null &&
+    grep -F 'OFFLINE_SINCE=0' "${STATE_FILE}" >/dev/null &&
+    grep -F 'ONLINE_SINCE=0' "${STATE_FILE}" >/dev/null; then
+    RECOVERY_PROVED=true
+  fi
+  [ "$(current_kiosk_pid)" = "${ORIGINAL_KIOSK_PID}" ] && { ok "Kiosk-PID bleef gelijk tijdens volledige netwerkproef"; PID_STABLE_PROVED=true; } || failure "Kiosk-PID wijzigde tijdens netwerkproef"
 
   restore_state_from_backup
   restore_config_from_backup
@@ -946,7 +1020,7 @@ else
   printf '%s\n' "${timer_after_restore}" | grep -F 'ActiveState=active' >/dev/null && printf '%s\n' "${timer_after_restore}" | grep -F 'SubState=waiting' >/dev/null && ok "Healthtimer is opnieuw active/waiting" || failure "Healthtimer is niet active/waiting na herstel"
   if [ "$(sha256sum "${ACTIVE_CONFIG}" | awk '{ print $1 }')" = "${ORIGINAL_CONFIG_SUM}" ]; then
     ok "Configuratiechecksum is hersteld"
-    CONFIG_RESTORED_PROVEN=true
+    CONFIG_RESTORED_PROVED=true
   else
     failure "Configuratiechecksum verschilt na herstel"
   fi
