@@ -11,8 +11,9 @@ sudo bash tests/run-tests.sh post
 De pre-installatietest gebruikt geen `sudo`, omdat de systemd-user-units in de
 gebruikersomgeving gecontroleerd moeten worden.
 
-De installer kopieert scripts, webbestanden, configuratie en systemd-units naar de juiste locaties.
-Daarnaast installeert de installer `python3` en `python3-websocket` wanneer `apt-get` beschikbaar is.
+De installer kopieert scripts, webbestanden, offlinebestanden, configuratie en
+systemd-units naar de juiste locaties. Daarnaast installeert de installer
+`curl`, `python3` en `python3-websocket` wanneer `apt-get` beschikbaar is.
 
 De Chromium-kiosk en de automatische health-check draaien als systemd
 user-services van `KIOSK_USER`, niet als globale systeemservices.
@@ -125,6 +126,33 @@ Handmatig een health-check uitvoeren zonder automatische herstelactie:
 
 ```bash
 /opt/digitalsignage/scripts/health-check.py --check-only
+```
+
+## Offlinepagina
+
+De statische offlinepagina wordt geinstalleerd onder:
+
+```bash
+/opt/digitalsignage/offline/index.html
+/opt/digitalsignage/offline/offline.css
+```
+
+Er is geen Apache, Nginx, PHP of lokale webserver nodig. Chromium opent de
+pagina rechtstreeks via:
+
+```bash
+file:///opt/digitalsignage/offline/index.html
+```
+
+Belangrijke configuratie:
+
+```ini
+OFFLINE_PAGE_ENABLED=true
+OFFLINE_AFTER_SECONDS=300
+ONLINE_CONFIRM_SECONDS=30
+CONNECTIVITY_CHECK_URL="https://clients3.google.com/generate_204"
+CONNECTIVITY_TIMEOUT_SECONDS=8
+OFFLINE_PAGE_URL="file:///opt/digitalsignage/offline/index.html"
 ```
 
 ## Desktopachtergrond
