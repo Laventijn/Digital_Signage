@@ -450,6 +450,46 @@ else:
 PY
 }
 
+wait_for_chromium_page() {
+  local expected_type="$1"
+  local timeout_seconds="${2:-10}"
+  local interval_seconds="${3:-1}"
+  local start_time current_time current_url current_type
+
+  start_time="$(date +%s)"
+  while true; do
+    current_url="$(get_current_url 2>/dev/null || true)"
+    current_type="$(classify_kiosk_url "${current_url}" 2>/dev/null || printf 'other')"
+
+    case "${expected_type}" in
+      offline)
+        if [ "${current_type}" = "offline" ]; then
+          printf '%s\n' "${current_url}"
+          return 0
+        fi
+        ;;
+      presentation)
+        if [ "${current_type}" = "presentation" ]; then
+          printf '%s\n' "${current_url}"
+          return 0
+        fi
+        ;;
+      *)
+        printf 'Onbekend verwacht paginatype: %s\n' "${expected_type}" >&2
+        return 2
+        ;;
+    esac
+
+    current_time="$(date +%s)"
+    if [ $((current_time - start_time)) -ge "${timeout_seconds}" ]; then
+      printf '%s\n' "${current_url}"
+      return 1
+    fi
+
+    sleep "${interval_seconds}"
+  done
+}
+
 restore_kiosk_url_if_needed() {
   local current classification
   current="$(get_current_url 2>/dev/null || true)"
@@ -847,9 +887,15 @@ else
   start_health_once && ok "Tweede offlinecontrole crasht niet" || failure "Tweede offlinecontrole faalt"
   second_line="$(last_health_line)"
   printf '%s\n' "${second_line}"
-  current_after_threshold="$(get_current_url 2>/dev/null || true)"
-  [ "$(classify_kiosk_url "${current_after_threshold}")" = "offline" ] && ok "Langdurige onderbreking toont offlinepagina" || failure "Offlinepagina is niet zichtbaar na drempel"
   printf '%s\n' "${second_line}" | grep -F 'action=show_offline_page' >/dev/null && ok "Log bevat show_offline_page" || warning "Log bevat geen show_offline_page"
+  printf '%s\n' "${second_line}" | grep -F 'reason=offline_threshold_reached' >/dev/null && ok "Log bevat offline_threshold_reached" || warning "Log bevat geen offline_threshold_reached"
+  info "Wacht maximaal 10 seconden tot Chromium de offlinepagina toont."
+  if current_after_threshold="$(wait_for_chromium_page offline 10 1)"; then
+    ok "Offlinepagina is zichtbaar na navigatie"
+  else
+    failure "Offlinepagina werd niet zichtbaar binnen 10 seconden"
+    info "Laatste Chromium-URL: ${current_after_threshold}"
+  fi
   grep -F 'OFFLINE_PAGE_SHOWN=true' "${STATE_FILE}" >/dev/null && ok "State bevat OFFLINE_PAGE_SHOWN=true" || failure "State bevat geen OFFLINE_PAGE_SHOWN=true"
   [ "$(current_kiosk_pid)" = "${ORIGINAL_KIOSK_PID}" ] && ok "Kiosk-PID bleef gelijk bij offlinepagina" || failure "Kiosk-PID wijzigde bij offlinepagina"
   LONG_INTERRUPTION_PROVEN=true
@@ -877,11 +923,15 @@ else
   start_health_once && ok "Tweede herstelcontrole crasht niet" || failure "Tweede herstelcontrole faalt"
   recovery_line="$(last_health_line)"
   printf '%s\n' "${recovery_line}"
-  final_url="$(get_current_url 2>/dev/null || true)"
-  final_classification="$(classify_kiosk_url "${final_url}")"
-  [ "${final_classification}" = "presentation" ] && ok "Kioskpagina keerde terug na stabiel herstel" || failure "Kioskpagina keerde niet terug; URL=${final_url}"
   printf '%s\n' "${recovery_line}" | grep -F 'show_kiosk_page' >/dev/null && ok "Log bevat show_kiosk_page" || warning "Log bevat geen show_kiosk_page"
   printf '%s\n' "${recovery_line}" | grep -F 'connectivity_restored' >/dev/null && ok "Log bevat connectivity_restored" || warning "Log bevat geen connectivity_restored"
+  info "Wacht maximaal 10 seconden tot Chromium terugkeert naar de presentatie."
+  if final_url="$(wait_for_chromium_page presentation 10 1)"; then
+    ok "Kioskpagina keerde terug na stabiel herstel"
+  else
+    failure "Kioskpagina keerde niet terug binnen 10 seconden"
+    info "Laatste Chromium-URL: ${final_url}"
+  fi
   grep -F 'OFFLINE_PAGE_SHOWN=false' "${STATE_FILE}" >/dev/null && ok "OFFLINE_PAGE_SHOWN=false na herstel" || failure "OFFLINE_PAGE_SHOWN is niet false na herstel"
   grep -F 'OFFLINE_SINCE=0' "${STATE_FILE}" >/dev/null && ok "OFFLINE_SINCE=0 na herstel" || failure "OFFLINE_SINCE is niet 0 na herstel"
   grep -F 'ONLINE_SINCE=0' "${STATE_FILE}" >/dev/null && ok "ONLINE_SINCE=0 na herstel" || failure "ONLINE_SINCE is niet 0 na herstel"
@@ -966,7 +1016,7 @@ try {
     Write-Host ""
 
     $remoteCommand = "TERM=dumb NO_COLOR=1 SYSTEMD_COLORS=0 SYSTEMD_PAGER=cat GIT_PAGER=cat DIGITALSIGNAGE_PROJECT_DIR='$PiProjectDir' PI_EXPECTED_BRANCH='$PiExpectedBranch' PHASE3_TEST_MODE='$Phase3TestMode' bash -lc 'chmod +x $remoteScript && bash $remoteScript'"
-    $testResult = Invoke-NativeCommand { & ssh -t $sshTarget $remoteCommand *> $logFile }
+    $testResult = Invoke-NativeCommand { & ssh -q -t $sshTarget $remoteCommand *> $logFile }
 
     Get-Content -LiteralPath $logFile
 }
