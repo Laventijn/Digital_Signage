@@ -67,3 +67,6 @@ echo "Verwijderd. Configuratie in /etc/digitalsignage en swaplogs blijven staan.
 echo "Een ICT-medewerker kan logs en state handmatig verwijderen met:"
 echo "  rm -f ~/.local/state/digitalsignage/swap.log ~/.local/state/digitalsignage/swap.log.1"
 echo "  rm -f ~/.local/state/digitalsignage/health.log ~/.local/state/digitalsignage/health.log.1 ~/.local/state/digitalsignage/health-state.json"
+echo
+echo "De desktopachtergrondconfiguratie in ~/.config/pcmanfm/LXDE-pi/desktop-items-0.conf blijft behouden."
+echo "Eventuele backups staan naast dat bestand als desktop-items-0.conf.backup.*."

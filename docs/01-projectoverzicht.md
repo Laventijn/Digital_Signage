@@ -12,6 +12,7 @@ De installatie moet:
 - Raspberry Pi OS Trixie 64-bit met Wayland/labwc gebruiken;
 - Chromium openen via `/usr/bin/chromium`;
 - de presentatie in kioskmodus tonen;
+- een vaste Digital Signage-achtergrond tonen wanneer Chromium niet zichtbaar is;
 - regelmatig terug navigeren naar de basis-URL van de Google Slides-presentatie;
 - verborgen of gewijzigde dia's correct verwerken;
 - RAM- en swapgebruik compact loggen;
@@ -131,6 +132,21 @@ Health-state en health-log staan in:
 
 De installer en upgrader maken deze map vooraf aan op basis van `KIOSK_USER` en `getent passwd`. Hardcoded homefolders zoals `/home/pi` of `/home/bloemkool` zijn niet toegestaan.
 
+### Desktopachtergrond
+
+Voor Raspberry Pi OS Trixie met Desktop wordt de vaste achtergrond ingesteld via
+de pcmanfm-configuratie van de kioskgebruiker:
+
+```text
+~/.config/pcmanfm/LXDE-pi/desktop-items-0.conf
+```
+
+De achtergrond staat in `/opt/digitalsignage/assets/wallpapers/` en wordt niet
+via Wayfire, X11 of toetsenbordautomatisering ingesteld. De installer en
+upgrader maken een backup van een bestaande pcmanfm-configuratie voordat zij
+die wijzigen. De actieve desktop wordt niet geforceerd herstart; de instelling
+is uiterlijk zichtbaar na de volgende desktopstart.
+
 ## Testframework
 
 Het project bevat automatische tests:
@@ -190,5 +206,6 @@ Een installatie is pas klaar voor gebruik wanneer:
 - `swap.log` iedere 10 minuten wordt bijgewerkt;
 - `digitalsignage-health.timer` actief is;
 - een gezonde kiosk `health=ok action=none` logt;
+- de desktopachtergrond zichtbaar is wanneer Chromium niet actief is;
 - geen geheimen in Git staan;
 - geen hardcoded homefolder gebruikt wordt.

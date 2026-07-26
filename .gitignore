@@ -13,6 +13,9 @@ test-logs/
 __pycache__/
 *.py[cod]
 
+# Local Windows Pi test launcher
+tools/windows/TestPI.bat
+
 # Secrets/local config
 *.local
 *.secret

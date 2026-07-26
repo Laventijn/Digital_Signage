@@ -117,6 +117,8 @@ test_repository() {
     "scripts/refresh-presentation.py"
     "scripts/log-resources.py"
     "scripts/health-check.py"
+    "scripts/configure-desktop-background.sh"
+    "assets/wallpapers/digitalsignage-background.png"
     "services/digitalsignage-kiosk.service"
     "services/digitalsignage-refresh.service"
     "services/digitalsignage-refresh.timer"
@@ -129,6 +131,7 @@ test_repository() {
     "tests/test-resource-log-retention.py"
     "tests/test-refresh-presentation.py"
     "tests/test_health_check.py"
+    "tests/test-desktop-background.sh"
   )
 
   for file in "${required_files[@]}"; do
@@ -140,7 +143,7 @@ test_repository() {
     fi
   done
 
-  for file in install/install.sh install/upgrade.sh install/uninstall.sh scripts/start-kiosk.sh scripts/refresh-kiosk.sh scripts/restart-chromium.sh scripts/health-check.sh scripts/health-check.py scripts/refresh-presentation.py scripts/log-resources.py; do
+  for file in install/install.sh install/upgrade.sh install/uninstall.sh scripts/start-kiosk.sh scripts/refresh-kiosk.sh scripts/restart-chromium.sh scripts/health-check.sh scripts/health-check.py scripts/refresh-presentation.py scripts/log-resources.py scripts/configure-desktop-background.sh tests/test-desktop-background.sh; do
     if [ -x "${TEST_ROOT_DIR}/${file}" ]; then
       log_ok "Uitvoerbaar: ${file}"
     else
@@ -309,11 +312,20 @@ test_health_check_unit() {
   fi
 }
 
+test_desktop_background_unit() {
+  if bash "${TEST_ROOT_DIR}/tests/test-desktop-background.sh"; then
+    log_ok "Desktopachtergrondtests slagen"
+  else
+    log_error "Desktopachtergrondtests falen"
+    return 1
+  fi
+}
+
 test_forbidden_patterns() {
   local failed=0
   local pattern
   local home_prefix="/home"
-  for pattern in "${home_prefix}/pi" "${home_prefix}/bloemkool" 'chromium-browser' 'DISPLAY=:0' 'export DISPLAY' 'DISPLAY_ID' 'xdotool' 'pkill -HUP' 'shell=True' 'pkill' 'killall' 'sudo systemctl'; do
+  for pattern in "${home_prefix}/pi" "${home_prefix}/bloemkool" 'chromium-browser' 'DISPLAY=:0' 'export DISPLAY' 'DISPLAY_ID' 'xdotool' 'pkill -HUP' 'shell=True' 'pkill' 'killall' 'sudo systemctl' 'wayfire.ini'; do
     if grep -R -n -F --exclude-dir=__pycache__ --exclude='*.pyc' --exclude='*.pyo' "${pattern}" "${TEST_ROOT_DIR}/install" "${TEST_ROOT_DIR}/scripts" "${TEST_ROOT_DIR}/services" "${TEST_ROOT_DIR}/config"; then
       log_error "Verboden patroon gevonden: ${pattern}"
       failed=1
@@ -328,7 +340,7 @@ test_config() {
   local failed=0
   local config="${TEST_ROOT_DIR}/config/digitalsignage.conf.example"
   local key value
-  for key in PRESENTATION_URL OFFLINE_URL CHROMIUM_BIN WAYLAND_DISPLAY REMOTE_DEBUG_HOST REMOTE_DEBUG_PORT CACHE_SIZE_MB KIOSK_USER REFRESH_SECONDS SWAP_LOG_MAX_BYTES RESOURCE_LOG_RETENTION_DAYS HEALTH_CHECK_SECONDS HEALTH_FAILURE_THRESHOLD HEALTH_RESTART_COOLDOWN_SECONDS HEALTH_HTTP_TIMEOUT_SECONDS HEALTH_STARTUP_GRACE_SECONDS HEALTH_LOG_RETENTION_DAYS HEALTH_LOG_MAX_BYTES; do
+  for key in PRESENTATION_URL OFFLINE_URL CHROMIUM_BIN WAYLAND_DISPLAY REMOTE_DEBUG_HOST REMOTE_DEBUG_PORT CACHE_SIZE_MB KIOSK_USER REFRESH_SECONDS SWAP_LOG_MAX_BYTES RESOURCE_LOG_RETENTION_DAYS HEALTH_CHECK_SECONDS HEALTH_FAILURE_THRESHOLD HEALTH_RESTART_COOLDOWN_SECONDS HEALTH_HTTP_TIMEOUT_SECONDS HEALTH_STARTUP_GRACE_SECONDS HEALTH_LOG_RETENTION_DAYS HEALTH_LOG_MAX_BYTES DESKTOP_BACKGROUND_ENABLED DESKTOP_BACKGROUND_FILE DESKTOP_BACKGROUND_MODE; do
     if [ -n "$(read_config_value "${key}" "${config}")" ]; then
       log_ok "Configvariabele aanwezig: ${key}"
     else
@@ -347,7 +359,30 @@ test_config() {
   [ "${value}" = "300" ] && log_ok "REFRESH_SECONDS standaard 300" || { log_error "REFRESH_SECONDS is '${value}', verwacht 300"; failed=1; }
   value="$(read_config_value HEALTH_CHECK_SECONDS "${config}")"
   [ "${value}" = "60" ] && log_ok "HEALTH_CHECK_SECONDS standaard 60" || { log_error "HEALTH_CHECK_SECONDS is '${value}', verwacht 60"; failed=1; }
+  value="$(read_config_value DESKTOP_BACKGROUND_ENABLED "${config}")"
+  [ "${value}" = "true" ] && log_ok "DESKTOP_BACKGROUND_ENABLED standaard true" || { log_error "DESKTOP_BACKGROUND_ENABLED is '${value}', verwacht true"; failed=1; }
+  value="$(read_config_value DESKTOP_BACKGROUND_FILE "${config}")"
+  [ "${value}" = "/opt/digitalsignage/assets/wallpapers/digitalsignage-background.png" ] && log_ok "DESKTOP_BACKGROUND_FILE correct" || { log_error "DESKTOP_BACKGROUND_FILE is '${value}'"; failed=1; }
+  value="$(read_config_value DESKTOP_BACKGROUND_MODE "${config}")"
+  [ "${value}" = "zoom" ] && log_ok "DESKTOP_BACKGROUND_MODE standaard zoom" || { log_error "DESKTOP_BACKGROUND_MODE is '${value}', verwacht zoom"; failed=1; }
 
+  return "${failed}"
+}
+
+test_desktop_background_integration() {
+  local failed=0
+  grep -q 'assets/wallpapers/digitalsignage-background.png' "${TEST_ROOT_DIR}/install/install.sh" && log_ok "Installer installeert desktopachtergrond" || { log_error "Installer verwerkt desktopachtergrond niet"; failed=1; }
+  grep -q 'configure-desktop-background.sh' "${TEST_ROOT_DIR}/install/install.sh" && log_ok "Installer voert desktopachtergrondscript uit" || { log_error "Installer voert desktopachtergrondscript niet uit"; failed=1; }
+  grep -q 'assets/wallpapers/digitalsignage-background.png' "${TEST_ROOT_DIR}/install/upgrade.sh" && log_ok "Upgrader installeert desktopachtergrond" || { log_error "Upgrader verwerkt desktopachtergrond niet"; failed=1; }
+  grep -q 'configure-desktop-background.sh' "${TEST_ROOT_DIR}/install/upgrade.sh" && log_ok "Upgrader voert desktopachtergrondscript uit" || { log_error "Upgrader voert desktopachtergrondscript niet uit"; failed=1; }
+  grep -q 'desktop-items-0.conf' "${TEST_ROOT_DIR}/install/uninstall.sh" && log_ok "Uninstaller documenteert achterblijvende desktopconfiguratie" || { log_error "Uninstaller meldt desktopconfiguratie niet"; failed=1; }
+  grep -q 'pcmanfm' "${TEST_ROOT_DIR}/scripts/configure-desktop-background.sh" && log_ok "Desktopachtergrond gebruikt pcmanfm-configuratie" || { log_error "Desktopachtergrondmethode ontbreekt"; failed=1; }
+  if grep -R -n -F --exclude-dir=__pycache__ --exclude='*.pyc' --exclude='*.pyo' 'wayfire' "${TEST_ROOT_DIR}/scripts/configure-desktop-background.sh" "${TEST_ROOT_DIR}/install" "${TEST_ROOT_DIR}/config"; then
+    log_error "Wayfire-configuratie gevonden in desktopachtergrondimplementatie"
+    failed=1
+  else
+    log_ok "Geen Wayfire-configuratie gebruikt"
+  fi
   return "${failed}"
 }
 
@@ -417,6 +452,18 @@ test_health_integration() {
   grep -q 'digitalsignage-health.timer' "${TEST_ROOT_DIR}/install/upgrade.sh" && log_ok "Upgrader werkt healthtimer bij" || { log_error "Upgrader verwerkt healthtimer niet"; failed=1; }
   grep -q 'digitalsignage-health.timer' "${TEST_ROOT_DIR}/install/uninstall.sh" && log_ok "Uninstaller verwijdert healthtimer" || { log_error "Uninstaller verwerkt healthtimer niet"; failed=1; }
   grep -q 'SuccessExitStatus=0 1' "${TEST_ROOT_DIR}/services/digitalsignage-health.service" && log_ok "Healthservice accepteert exitcode 1 als verwachte ongezonde status" || { log_error "SuccessExitStatus=0 1 ontbreekt"; failed=1; }
+  grep -q '^OnActiveSec=2min$' "${TEST_ROOT_DIR}/services/digitalsignage-health.timer" && log_ok "Healthtimer heeft OnActiveSec voor eerste run na timerstart" || { log_error "Healthtimer mist OnActiveSec=2min"; failed=1; }
+  grep -q '^OnUnitInactiveSec=60s$' "${TEST_ROOT_DIR}/services/digitalsignage-health.timer" && log_ok "Healthtimer gebruikt OnUnitInactiveSec" || { log_error "Healthtimer mist OnUnitInactiveSec=60s"; failed=1; }
+  if grep -q '^OnUnitActiveSec=60s$' "${TEST_ROOT_DIR}/services/digitalsignage-health.timer"; then
+    log_error "Healthtimer gebruikt nog actieve OnUnitActiveSec=60s"
+    failed=1
+  else
+    log_ok "Healthtimer gebruikt geen actieve OnUnitActiveSec=60s"
+  fi
+  grep -q '^OnBootSec=$' "${TEST_ROOT_DIR}/install/install.sh" && grep -q '^OnActiveSec=2min$' "${TEST_ROOT_DIR}/install/install.sh" && grep -q '^OnUnitInactiveSec=${interval}s$' "${TEST_ROOT_DIR}/install/install.sh" &&
+    log_ok "Installer-drop-in reset OnBootSec en bouwt OnActiveSec en OnUnitInactiveSec op" || { log_error "Installer-drop-in voor healthtimer is onjuist"; failed=1; }
+  grep -q '^OnBootSec=$' "${TEST_ROOT_DIR}/install/upgrade.sh" && grep -q '^OnActiveSec=2min$' "${TEST_ROOT_DIR}/install/upgrade.sh" && grep -q '^OnUnitInactiveSec=${interval}s$' "${TEST_ROOT_DIR}/install/upgrade.sh" &&
+    log_ok "Upgrader-drop-in reset OnBootSec en bouwt OnActiveSec en OnUnitInactiveSec op" || { log_error "Upgrader-drop-in voor healthtimer is onjuist"; failed=1; }
 
   if grep -q 'sudo' "${TEST_ROOT_DIR}/scripts/health-check.py"; then
     log_error "health-check.py bevat sudo"
@@ -454,9 +501,11 @@ run_test "Upgradeconfiguratie-merge" test_upgrade_config_merge
 run_test "Resource-logretentie" test_resource_log_retention
 run_test "Refresh-presentatie unit tests" test_refresh_presentation_unit
 run_test "Health-check unit tests" test_health_check_unit
+run_test "Desktopachtergrondtests" test_desktop_background_unit
 run_test "Verboden patronen" test_forbidden_patterns
 run_test "Configuratie" test_config
 run_test "Statusmap-oplossing" test_state_directory_fix
 run_test "Health-check integratie" test_health_integration
+run_test "Desktopachtergrond integratie" test_desktop_background_integration
 
 print_summary

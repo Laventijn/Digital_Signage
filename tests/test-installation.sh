@@ -76,6 +76,33 @@ if ! grep -q 'digitalsignage-health.timer.d' "${ROOT_DIR}/install/install.sh" ||
   exit 1
 fi
 
+if ! grep -q '^OnActiveSec=2min$' "${ROOT_DIR}/services/digitalsignage-health.timer"; then
+  echo "Healthtimer mist OnActiveSec=2min voor de eerste run na timerstart." >&2
+  exit 1
+fi
+
+if ! grep -q '^OnUnitInactiveSec=60s$' "${ROOT_DIR}/services/digitalsignage-health.timer"; then
+  echo "Healthtimer gebruikt niet standaard OnUnitInactiveSec=60s." >&2
+  exit 1
+fi
+
+if grep -q '^OnUnitActiveSec=60s$' "${ROOT_DIR}/services/digitalsignage-health.timer"; then
+  echo "Healthtimer gebruikt nog actief OnUnitActiveSec=60s." >&2
+  exit 1
+fi
+
+for file in "${ROOT_DIR}/install/install.sh" "${ROOT_DIR}/install/upgrade.sh"; do
+  health_dropin_body="$(awk '/^write_health_timer_dropin\(\)/,/^}/' "${file}")"
+  if ! printf '%s\n' "${health_dropin_body}" | grep -q '^OnBootSec=$' ||
+    ! printf '%s\n' "${health_dropin_body}" | grep -q '^OnActiveSec=2min$' ||
+    ! printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitInactiveSec=${interval}s$' ||
+    printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitActiveSec=' ||
+    printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitInactiveSec=$'; then
+    echo "${file} schrijft de healthtimer-drop-in niet correct met OnActiveSec en OnUnitInactiveSec." >&2
+    exit 1
+  fi
+done
+
 if grep -q 'Path.home() / ".local" / "state" / "digitalsignage"' "${ROOT_DIR}/scripts/refresh-presentation.py"; then
   echo "Refreshscript mag niet langer naar de gebruikersstatusmap loggen." >&2
   exit 1

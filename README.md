@@ -9,6 +9,7 @@ Het doelplatform is Raspberry Pi OS Trixie 64-bit met Wayland/labwc en Chromium 
 - Installatie- en beheerscripts staan in `install/` en `scripts/`.
 - Systemd servicebestanden staan in `services/`.
 - Voorbeeldconfiguratie staat in `config/`.
+- De vaste desktopachtergrond staat in `assets/wallpapers/`.
 - Offline fallbackpagina staat in `web/offline/`.
 
 ## Snelle start
@@ -94,6 +95,28 @@ Opnieuw inschakelen:
 ```bash
 systemctl --user enable --now digitalsignage-health.timer
 ```
+
+## Desktopachtergrond
+
+De installer stelt een vaste Digital Signage-achtergrond in voor de kioskgebruiker.
+Die achtergrond is zichtbaar voordat Chromium start, tijdens een korte
+Chromium-herstart en wanneer de kioskservice niet actief is. Raspberry Pi OS
+Trixie met Desktop gebruikt hiervoor de per-user pcmanfm-configuratie:
+
+```bash
+~/.config/pcmanfm/LXDE-pi/desktop-items-0.conf
+```
+
+Instellingen:
+
+```ini
+DESKTOP_BACKGROUND_ENABLED=true
+DESKTOP_BACKGROUND_FILE="/opt/digitalsignage/assets/wallpapers/digitalsignage-background.png"
+DESKTOP_BACKGROUND_MODE=zoom
+```
+
+Tijdelijk uitschakelen kan door `DESKTOP_BACKGROUND_ENABLED=false` te zetten en
+daarna `sudo bash install/upgrade.sh` uit te voeren.
 
 ## Documentatie
 

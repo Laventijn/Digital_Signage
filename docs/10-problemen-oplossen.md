@@ -37,6 +37,36 @@ scripts/restart-chromium.sh
 
 `scripts/refresh-kiosk.sh` is alleen nog een compatibiliteitswrapper naar `refresh-presentation.py`. De wrapper stuurt geen F5, Ctrl+R, SIGHUP of toetsen meer.
 
+## Desktopachtergrond Niet Zichtbaar
+
+Controleer eerst of de achtergrond is geinstalleerd:
+
+```bash
+ls -l /opt/digitalsignage/assets/wallpapers/digitalsignage-background.png
+```
+
+Controleer daarna als kioskgebruiker de pcmanfm-configuratie:
+
+```bash
+grep -E '^(wallpaper|wallpaper_mode)=' ~/.config/pcmanfm/LXDE-pi/desktop-items-0.conf
+```
+
+De instelling wordt niet met een geforceerde desktoprestart afgedwongen. Als de
+huidige desktop nog de oude achtergrond toont, meld de kioskgebruiker opnieuw
+aan of herstart de Raspberry Pi gecontroleerd.
+
+Tijdelijk uitschakelen kan via:
+
+```ini
+DESKTOP_BACKGROUND_ENABLED=false
+```
+
+Voer daarna uit:
+
+```bash
+sudo bash install/upgrade.sh
+```
+
 ## Automatische Health-Check
 
 De health-check draait als systemd user-timer. Een enkele tijdelijke fout

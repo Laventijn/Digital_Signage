@@ -17,6 +17,10 @@ Daarnaast installeert de installer `python3` en `python3-websocket` wanneer `apt
 De Chromium-kiosk en de automatische health-check draaien als systemd
 user-services van `KIOSK_USER`, niet als globale systeemservices.
 
+De installer stelt ook een vaste desktopachtergrond in voor de kioskgebruiker.
+Die achtergrond is zichtbaar voordat Chromium start, tijdens een gecontroleerde
+Chromium-herstart of wanneer de kioskservice niet actief is.
+
 ## Kiosk User-Service
 
 De kiosk gebruikt Raspberry Pi OS Trixie met Wayland/labwc en start `/usr/bin/chromium` met `--ozone-platform=wayland`. De user-service wordt geinstalleerd onder:
@@ -36,6 +40,39 @@ Status bekijken:
 
 ```bash
 systemctl --user status digitalsignage-kiosk.service
+```
+
+Kiosk tijdelijk stoppen:
+
+```bash
+systemctl --user stop digitalsignage-kiosk.service
+```
+
+Kiosk stoppen en voorkomen dat hij automatisch opnieuw start bij de volgende
+usersessie:
+
+```bash
+systemctl --user disable --now digitalsignage-kiosk.service
+```
+
+Let op: als de health-check actief blijft, kan die de kiosk later opnieuw
+starten. Stop daarom tijdelijk ook de healthtimer wanneer de kiosk bewust uit
+moet blijven:
+
+```bash
+systemctl --user disable --now digitalsignage-health.timer
+```
+
+Kiosk opnieuw inschakelen:
+
+```bash
+systemctl --user enable --now digitalsignage-kiosk.service
+```
+
+Health-check opnieuw inschakelen:
+
+```bash
+systemctl --user enable --now digitalsignage-health.timer
 ```
 
 ## Refresh Timer, Resource-Logtimer En Healthtimer
@@ -88,4 +125,37 @@ Handmatig een health-check uitvoeren zonder automatische herstelactie:
 
 ```bash
 /opt/digitalsignage/scripts/health-check.py --check-only
+```
+
+## Desktopachtergrond
+
+De achtergrond wordt geinstalleerd als:
+
+```bash
+/opt/digitalsignage/assets/wallpapers/digitalsignage-background.png
+```
+
+Voor Raspberry Pi OS Trixie met labwc wordt de desktopachtergrond ingesteld via
+de pcmanfm-configuratie van de kioskgebruiker:
+
+```bash
+~/.config/pcmanfm/LXDE-pi/desktop-items-0.conf
+```
+
+Controleer de instelling als kioskgebruiker:
+
+```bash
+grep -E '^(wallpaper|wallpaper_mode)=' ~/.config/pcmanfm/LXDE-pi/desktop-items-0.conf
+```
+
+Tijdelijk uitschakelen:
+
+```ini
+DESKTOP_BACKGROUND_ENABLED=false
+```
+
+Voer daarna opnieuw uit:
+
+```bash
+sudo bash install/upgrade.sh
 ```

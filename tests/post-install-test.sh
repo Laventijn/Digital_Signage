@@ -136,7 +136,7 @@ test_user_and_config() {
 test_install_paths() {
   local failed=0
   local path
-  for path in /opt/digitalsignage /etc/digitalsignage/digitalsignage.conf /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py /opt/digitalsignage/scripts/health-check.py; do
+  for path in /opt/digitalsignage /etc/digitalsignage/digitalsignage.conf /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py /opt/digitalsignage/scripts/health-check.py /opt/digitalsignage/scripts/configure-desktop-background.sh /opt/digitalsignage/assets/wallpapers/digitalsignage-background.png; do
     if [ -e "${path}" ]; then
       log_ok "Installatiepad bestaat: ${path}"
     else
@@ -145,7 +145,7 @@ test_install_paths() {
     fi
   done
 
-  for path in /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py /opt/digitalsignage/scripts/health-check.py /opt/digitalsignage/scripts/health-check.sh /opt/digitalsignage/scripts/refresh-kiosk.sh /opt/digitalsignage/scripts/restart-chromium.sh /opt/digitalsignage/scripts/show-network-info.sh /opt/digitalsignage/scripts/check-network.sh; do
+  for path in /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py /opt/digitalsignage/scripts/health-check.py /opt/digitalsignage/scripts/configure-desktop-background.sh /opt/digitalsignage/scripts/health-check.sh /opt/digitalsignage/scripts/refresh-kiosk.sh /opt/digitalsignage/scripts/restart-chromium.sh /opt/digitalsignage/scripts/show-network-info.sh /opt/digitalsignage/scripts/check-network.sh; do
     if [ -x "${path}" ]; then
       log_ok "Script is uitvoerbaar: ${path}"
     else
@@ -158,6 +158,37 @@ test_install_paths() {
       [ "${mode}" = "755" ] && log_ok "Scriptmodus is 0755: ${path}" || { log_error "Scriptmodus is ${mode}, verwacht 0755: ${path}"; failed=1; }
     fi
   done
+
+  if [ -e /opt/digitalsignage/assets/wallpapers/digitalsignage-background.png ]; then
+    local wallpaper_mode
+    wallpaper_mode="$(stat -c '%a' /opt/digitalsignage/assets/wallpapers/digitalsignage-background.png)"
+    [ "${wallpaper_mode}" = "644" ] && log_ok "Desktopachtergrondmodus is 0644" || { log_error "Desktopachtergrondmodus is ${wallpaper_mode}, verwacht 644"; failed=1; }
+  fi
+  return "${failed}"
+}
+
+test_desktop_background() {
+  local failed=0
+  local enabled background_file mode desktop_config
+
+  enabled="$(read_config_value DESKTOP_BACKGROUND_ENABLED "${CONFIG_FILE}")"
+  background_file="$(read_config_value DESKTOP_BACKGROUND_FILE "${CONFIG_FILE}")"
+  mode="$(read_config_value DESKTOP_BACKGROUND_MODE "${CONFIG_FILE}")"
+  desktop_config="${KIOSK_HOME}/.config/pcmanfm/LXDE-pi/desktop-items-0.conf"
+
+  [ "${enabled}" = "true" ] && log_ok "Desktopachtergrond staat standaard aan" || { log_error "DESKTOP_BACKGROUND_ENABLED is ${enabled:-leeg}"; failed=1; }
+  [ "${background_file}" = "/opt/digitalsignage/assets/wallpapers/digitalsignage-background.png" ] && log_ok "Desktopachtergrondpad correct" || { log_error "DESKTOP_BACKGROUND_FILE is ${background_file:-leeg}"; failed=1; }
+  [ "${mode}" = "zoom" ] && log_ok "Desktopachtergrondmodus correct" || { log_error "DESKTOP_BACKGROUND_MODE is ${mode:-leeg}"; failed=1; }
+
+  if [ -f "${desktop_config}" ]; then
+    log_ok "pcmanfm-desktopconfiguratie bestaat: ${desktop_config}"
+    grep -F "wallpaper=${background_file}" "${desktop_config}" >/dev/null && log_ok "Desktopconfiguratie verwijst naar projectachtergrond" || { log_error "Desktopconfiguratie verwijst niet naar projectachtergrond"; failed=1; }
+    grep -F "wallpaper_mode=crop" "${desktop_config}" >/dev/null && log_ok "Desktopconfiguratie gebruikt crop voor zoom" || { log_error "Desktopconfiguratie mist wallpaper_mode=crop"; failed=1; }
+  else
+    log_error "pcmanfm-desktopconfiguratie ontbreekt: ${desktop_config}"
+    failed=1
+  fi
+
   return "${failed}"
 }
 
@@ -191,7 +222,7 @@ test_status_directory() {
 
 test_user_systemd() {
   local failed=0
-  local unit
+  local unit health_seconds health_dropin inactive_count active_count
   if [ ! -S "/run/user/${KIOSK_UID}/bus" ]; then
     log_error "Geen actieve user-D-Bus gevonden: /run/user/${KIOSK_UID}/bus"
     return 1
@@ -217,6 +248,27 @@ test_user_systemd() {
   run_user_systemctl is-active digitalsignage-refresh.timer >/dev/null && log_ok "Refreshtimer is actief" || { log_error "Refreshtimer is niet actief"; failed=1; }
   run_user_systemctl is-active digitalsignage-resource-log.timer >/dev/null && log_ok "Resource-logtimer is actief" || { log_error "Resource-logtimer is niet actief"; failed=1; }
   run_user_systemctl is-active digitalsignage-health.timer >/dev/null && log_ok "Healthtimer is actief" || { log_error "Healthtimer is niet actief"; failed=1; }
+
+  health_seconds="$(read_config_value HEALTH_CHECK_SECONDS "${CONFIG_FILE}")"
+  health_dropin="${KIOSK_HOME}/.config/systemd/user/digitalsignage-health.timer.d/interval.conf"
+  if [ -f "${health_dropin}" ]; then
+    inactive_count="$(awk -F= '$1 == "OnUnitInactiveSec" && $2 != "" { count++ } END { print count + 0 }' "${health_dropin}")"
+    active_count="$(awk -F= '$1 == "OnUnitActiveSec" && $2 != "" { count++ } END { print count + 0 }' "${health_dropin}")"
+    grep -q '^OnBootSec=$' "${health_dropin}" && log_ok "Healthtimer-drop-in reset oude OnBootSec" || { log_error "Healthtimer-drop-in reset OnBootSec niet"; failed=1; }
+    grep -q '^OnActiveSec=2min$' "${health_dropin}" && log_ok "Healthtimer-drop-in bouwt OnActiveSec opnieuw op" || { log_error "Healthtimer-drop-in mist OnActiveSec=2min"; failed=1; }
+    [ "${inactive_count}" = "1" ] && log_ok "Healthtimer-drop-in bevat exact een actieve OnUnitInactiveSec" || { log_error "Healthtimer-drop-in bevat ${inactive_count} actieve OnUnitInactiveSec-regels"; failed=1; }
+    grep -q "^OnUnitInactiveSec=${health_seconds}s$" "${health_dropin}" && log_ok "Healthtimer-drop-in gebruikt HEALTH_CHECK_SECONDS=${health_seconds}" || { log_error "Healthtimer-drop-in gebruikt niet HEALTH_CHECK_SECONDS=${health_seconds}"; failed=1; }
+    [ "${active_count}" = "0" ] && log_ok "Healthtimer-drop-in gebruikt geen actieve OnUnitActiveSec" || { log_error "Healthtimer-drop-in bevat actieve OnUnitActiveSec"; failed=1; }
+    if grep -q '^OnUnitActiveSec=$' "${health_dropin}" || grep -q '^OnUnitInactiveSec=$' "${health_dropin}"; then
+      log_error "Healthtimer-drop-in gebruikt nog een lege OnUnitActiveSec/OnUnitInactiveSec-reset"
+      failed=1
+    else
+      log_ok "Healthtimer-drop-in gebruikt geen lege OnUnitActiveSec/OnUnitInactiveSec-reset"
+    fi
+  else
+    log_error "Healthtimer-drop-in ontbreekt: ${health_dropin}"
+    failed=1
+  fi
 
   return "${failed}"
 }
@@ -398,25 +450,40 @@ test_health_check() {
 }
 
 test_timer() {
+  local failed=0 health_properties sub_state next_elapse
   run_user_systemctl list-timers --all --no-pager | grep digitalsignage || true
   if run_user_systemctl list-timers --all --no-pager | grep -F 'digitalsignage-refresh.timer' >/dev/null; then
     log_ok "Refreshtimer heeft timerinformatie"
   else
     log_error "Refreshtimer ontbreekt in list-timers"
-    return 1
+    failed=1
   fi
   if run_user_systemctl list-timers --all --no-pager | grep -F 'digitalsignage-resource-log.timer' >/dev/null; then
     log_ok "Resource-logtimer heeft timerinformatie"
   else
     log_error "Resource-logtimer ontbreekt in list-timers"
-    return 1
+    failed=1
   fi
   if run_user_systemctl list-timers --all --no-pager | grep -F 'digitalsignage-health.timer' >/dev/null; then
     log_ok "Healthtimer heeft timerinformatie"
-    return 0
+  else
+    log_error "Healthtimer ontbreekt in list-timers"
+    failed=1
   fi
-  log_error "Healthtimer ontbreekt in list-timers"
-  return 1
+
+  run_user_systemctl start digitalsignage-health.service || {
+    log_error "Handmatige healthservice-start voor timercontrole faalt"
+    return 1
+  }
+  sleep 2
+  health_properties="$(run_user_systemctl show digitalsignage-health.timer --property=ActiveState --property=SubState --property=NextElapseUSecRealtime --property=LastTriggerUSec --no-pager 2>&1 || true)"
+  printf '%s\n' "${health_properties}"
+  sub_state="$(printf '%s\n' "${health_properties}" | awk -F= '$1 == "SubState" { print $2 }')"
+  next_elapse="$(printf '%s\n' "${health_properties}" | awk -F= '$1 == "NextElapseUSecRealtime" { print $2 }')"
+  [ "${sub_state}" != "elapsed" ] && log_ok "Healthtimer blijft niet hangen in SubState=elapsed" || { log_error "Healthtimer staat in SubState=elapsed"; failed=1; }
+  [ -n "${next_elapse}" ] && log_ok "Healthtimer heeft een volgende trigger gepland" || { log_error "Healthtimer heeft geen NextElapseUSecRealtime"; failed=1; }
+
+  return "${failed}"
 }
 
 test_system_status() {
@@ -459,6 +526,7 @@ test_journals() {
 
 run_test "Gebruiker en configuratie" test_user_and_config
 run_test "Installatiepaden" test_install_paths
+run_test "Desktopachtergrond" test_desktop_background
 run_test "Statusmap" test_status_directory
 run_test "User-systemd" test_user_systemd
 run_test "Chromium" test_chromium
