@@ -63,6 +63,17 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local file="$1"
+  local unexpected="$2"
+
+  if grep -F -- "${unexpected}" "${file}" >/dev/null; then
+    echo "Onverwachte tekst in ${file}: ${unexpected}" >&2
+    sed -n '1,120p' "${file}" >&2
+    return 1
+  fi
+}
+
 assert_count() {
   local file="$1"
   local pattern="$2"
@@ -130,7 +141,7 @@ test_disabled_does_not_change_config() {
   checksum_after="$(sha256sum "${desktop_config}" | awk '{ print $1 }')"
   [ "${checksum_before}" = "${checksum_after}" ]
   assert_contains "${desktop_config}" "wallpaper=/blijft/staan.png"
-  ! assert_contains "${desktop_config}" "wallpaper=${wallpaper_file}"
+  assert_not_contains "${desktop_config}" "wallpaper=${wallpaper_file}"
 }
 
 test_missing_wallpaper_fails() {
