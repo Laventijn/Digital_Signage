@@ -117,9 +117,15 @@ determine_kiosk_home() {
 pcmanfm_desktop_is_active() {
   local user="$1"
 
-  if [ "${DIGITALSIGNAGE_TEST_PCMANFM_ACTIVE:-}" = "1" ]; then
-    return 0
-  fi
+  case "${DIGITALSIGNAGE_TEST_PCMANFM_ACTIVE:-}" in
+    "") ;;
+    "1") return 0 ;;
+    "0") return 1 ;;
+    *)
+      error "Ongeldige DIGITALSIGNAGE_TEST_PCMANFM_ACTIVE='${DIGITALSIGNAGE_TEST_PCMANFM_ACTIVE}'. Gebruik 1, 0 of laat leeg."
+      return 2
+      ;;
+  esac
 
   [ -n "$(pcmanfm_desktop_pid "${user}")" ]
 }

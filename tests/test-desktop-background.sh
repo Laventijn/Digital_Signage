@@ -195,6 +195,7 @@ test_no_pcmanfm_command_when_desktop_inactive() {
   DIGITALSIGNAGE_TEST_KIOSK_USER="$(id -un)" \
   DIGITALSIGNAGE_TEST_KIOSK_GROUP="$(id -gn)" \
   DIGITALSIGNAGE_TEST_KIOSK_HOME="${home_dir}" \
+  DIGITALSIGNAGE_TEST_PCMANFM_ACTIVE=0 \
   DIGITALSIGNAGE_TEST_PCMANFM_COMMAND_LOG="${command_log}" \
     bash "${ROOT_DIR}/scripts/configure-desktop-background.sh" >/dev/null
 
