@@ -55,7 +55,11 @@ assert_contains() {
   local file="$1"
   local expected="$2"
 
-  grep -F -- "${expected}" "${file}" >/dev/null
+  if ! grep -F -- "${expected}" "${file}" >/dev/null; then
+    echo "Ontbrekende tekst in ${file}: ${expected}" >&2
+    [ -f "${file}" ] && sed -n '1,120p' "${file}" >&2
+    return 1
+  fi
 }
 
 assert_count() {
@@ -151,10 +155,14 @@ test_pcmanfm_command_is_built() {
 
   run_configurator_with_pcmanfm_log "${config_file}" "${home_dir}" "${command_log}" >/dev/null
 
-  assert_contains "${command_log}" "XDG_RUNTIME_DIR=${TEST_TMP_DIR}/runtime"
-  assert_contains "${command_log}" "DBUS_SESSION_BUS_ADDRESS=unix:path=${TEST_TMP_DIR}/runtime/bus"
-  assert_contains "${command_log}" "WAYLAND_DISPLAY=wayland-0"
-  assert_contains "${command_log}" "command pcmanfm --profile LXDE-pi --set-wallpaper=${wallpaper_file} --wallpaper-mode=crop"
+  assert_contains "${command_log}" "env_XDG_RUNTIME_DIR=${TEST_TMP_DIR}/runtime"
+  assert_contains "${command_log}" "env_DBUS_SESSION_BUS_ADDRESS=unix:path=${TEST_TMP_DIR}/runtime/bus"
+  assert_contains "${command_log}" "env_WAYLAND_DISPLAY=wayland-0"
+  assert_contains "${command_log}" "arg_0=pcmanfm"
+  assert_contains "${command_log}" "arg_1=--profile"
+  assert_contains "${command_log}" "arg_2=LXDE-pi"
+  assert_contains "${command_log}" "arg_3=--set-wallpaper=${wallpaper_file}"
+  assert_contains "${command_log}" "arg_4=--wallpaper-mode=crop"
 }
 
 test_no_pcmanfm_command_when_desktop_inactive() {

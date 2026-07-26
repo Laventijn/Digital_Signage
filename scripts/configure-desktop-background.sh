@@ -194,11 +194,17 @@ run_pcmanfm_wallpaper_command() {
   if [ -n "${DIGITALSIGNAGE_TEST_PCMANFM_COMMAND_LOG:-}" ]; then
     {
       printf 'user=%s\n' "${user}"
-      printf 'env'
-      printf ' %q' "${env_args[@]}"
-      printf '\ncommand'
-      printf ' %q' "${command_args[@]}"
-      printf '\n'
+      printf 'env_XDG_RUNTIME_DIR=%s\n' "${runtime_dir}"
+      printf 'env_DBUS_SESSION_BUS_ADDRESS=%s\n' "${bus_path}"
+      printf 'env_WAYLAND_DISPLAY=%s\n' "${wayland_display}"
+      if [ -n "${display}" ]; then
+        printf 'env_DISPLAY=%s\n' "${display}"
+      fi
+      printf 'arg_0=%s\n' "pcmanfm"
+      printf 'arg_1=%s\n' "--profile"
+      printf 'arg_2=%s\n' "${PCMANFM_PROFILE}"
+      printf 'arg_3=%s\n' "--set-wallpaper=${wallpaper_file}"
+      printf 'arg_4=%s\n' "--wallpaper-mode=${wallpaper_mode}"
     } >>"${DIGITALSIGNAGE_TEST_PCMANFM_COMMAND_LOG}"
     return 0
   fi
