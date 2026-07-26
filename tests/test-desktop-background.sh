@@ -46,6 +46,7 @@ run_configurator_with_pcmanfm_log() {
   DIGITALSIGNAGE_TEST_KIOSK_UID="$(id -u)" \
   DIGITALSIGNAGE_TEST_KIOSK_HOME="${home_dir}" \
   DIGITALSIGNAGE_TEST_XDG_RUNTIME_DIR="${TEST_TMP_DIR}/runtime" \
+  DIGITALSIGNAGE_TEST_DBUS_SESSION_BUS_ADDRESS="unix:path=${TEST_TMP_DIR}/runtime/bus" \
   DIGITALSIGNAGE_TEST_PCMANFM_ACTIVE=1 \
   DIGITALSIGNAGE_TEST_PCMANFM_COMMAND_LOG="${command_log}" \
     bash "${ROOT_DIR}/scripts/configure-desktop-background.sh"
@@ -116,14 +117,18 @@ test_disabled_does_not_change_config() {
   local config_file="${TEST_TMP_DIR}/disabled.conf"
   local desktop_dir="${home_dir}/.config/pcmanfm/LXDE-pi"
   local desktop_config="${desktop_dir}/desktop-items-0.conf"
+  local checksum_before checksum_after
 
   mkdir -p "${desktop_dir}"
   printf 'png\n' >"${wallpaper_file}"
   printf '[*]\nwallpaper=/blijft/staan.png\n' >"${desktop_config}"
+  checksum_before="$(sha256sum "${desktop_config}" | awk '{ print $1 }')"
   write_config "${config_file}" "false" "${wallpaper_file}" "zoom"
 
   run_configurator "${config_file}" "${home_dir}" >/dev/null
 
+  checksum_after="$(sha256sum "${desktop_config}" | awk '{ print $1 }')"
+  [ "${checksum_before}" = "${checksum_after}" ]
   assert_contains "${desktop_config}" "wallpaper=/blijft/staan.png"
   ! assert_contains "${desktop_config}" "wallpaper=${wallpaper_file}"
 }

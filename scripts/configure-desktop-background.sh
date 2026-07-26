@@ -148,15 +148,17 @@ run_pcmanfm_wallpaper_command() {
   local -a env_args command_args
 
   runtime_dir="${DIGITALSIGNAGE_TEST_XDG_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/run/user/${uid}}}"
-  bus_path="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${runtime_dir}/bus}"
+  bus_path="${DIGITALSIGNAGE_TEST_DBUS_SESSION_BUS_ADDRESS:-}"
   wayland_display="${WAYLAND_DISPLAY:-${DEFAULT_WAYLAND_DISPLAY}}"
   display="${DISPLAY:-}"
   pcmanfm_pid="$(pcmanfm_desktop_pid "${user}" || true)"
   if [ -n "${pcmanfm_pid}" ]; then
+    bus_path="${bus_path:-$(process_environment_value "${pcmanfm_pid}" DBUS_SESSION_BUS_ADDRESS || true)}"
     wayland_display="$(process_environment_value "${pcmanfm_pid}" WAYLAND_DISPLAY || true)"
     wayland_display="${wayland_display:-${DEFAULT_WAYLAND_DISPLAY}}"
     display="$(process_environment_value "${pcmanfm_pid}" DISPLAY || true)"
   fi
+  bus_path="${bus_path:-unix:path=${runtime_dir}/bus}"
 
   if [ -z "${DIGITALSIGNAGE_TEST_PCMANFM_COMMAND_LOG:-}" ] && [ ! -d "${runtime_dir}" ]; then
     warn "geen actieve gebruikersruntime gevonden: ${runtime_dir}; achtergrond wordt bij volgende desktopstart toegepast."
