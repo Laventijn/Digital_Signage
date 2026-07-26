@@ -23,9 +23,9 @@ require_command() {
 install_packages() {
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update
-    apt-get install -y python3 python3-websocket
+    apt-get install -y curl python3 python3-websocket
   else
-    echo "Waarschuwing: apt-get niet gevonden; installeer python3 en python3-websocket handmatig." >&2
+    echo "Waarschuwing: apt-get niet gevonden; installeer curl, python3 en python3-websocket handmatig." >&2
   fi
 }
 
@@ -114,6 +114,9 @@ install_project_files() {
   done < <(find "${PROJECT_ROOT}/scripts" -maxdepth 1 -type f -print0)
   install -d -m 0755 "${INSTALL_DIR}/assets/wallpapers"
   install -m 0644 "${PROJECT_ROOT}/assets/wallpapers/digitalsignage-background.png" "${INSTALL_DIR}/assets/wallpapers/digitalsignage-background.png"
+  install -d -m 0755 "${INSTALL_DIR}/offline"
+  install -m 0644 "${PROJECT_ROOT}/assets/offline/index.html" "${INSTALL_DIR}/offline/index.html"
+  install -m 0644 "${PROJECT_ROOT}/assets/offline/offline.css" "${INSTALL_DIR}/offline/offline.css"
   cp -R "${PROJECT_ROOT}/web" "${INSTALL_DIR}/"
 }
 

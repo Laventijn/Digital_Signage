@@ -25,3 +25,4 @@ Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 - Fase 2B toegevoegd: automatische user-level health-check met failure threshold, startup-grace, restart-cooldown, `health.log` en `health-state.json`.
 - Fase 2C toegevoegd: vaste Digital Signage-desktopachtergrond via pcmanfm-configuratie, inclusief installatie-, upgrade-, uninstall- en testdekking.
 - Healthtimer aangepast naar `OnActiveSec` plus `OnUnitInactiveSec`, en desktopachtergrond wordt waar mogelijk direct via actieve PCManFM toegepast.
+- Fase 3 toegevoegd: connectiviteitsdetectie via NetworkManager en HTTP-controle, gevalideerde `connectivity.state`, lokale offlinepagina onder `/opt/digitalsignage/offline/` en automatisch herstel naar de kiosk-URL na stabiel netwerkherstel.

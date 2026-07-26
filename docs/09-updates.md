@@ -17,9 +17,16 @@ Herstart daarna de kioskservice als kioskgebruiker:
 systemctl --user restart digitalsignage-kiosk.service
 ```
 
-Een upgrade vult ontbrekende configuratiewaarden, zoals `REFRESH_SECONDS=300`
-en `RESOURCE_LOG_RETENTION_DAYS=3`, idempotent aan. Bestaande aangepaste waarden
-worden niet overschreven.
+Een upgrade vult ontbrekende configuratiewaarden, zoals `REFRESH_SECONDS=300`,
+`RESOURCE_LOG_RETENTION_DAYS=3` en de offlinevelden, idempotent aan. Bestaande
+aangepaste waarden worden niet overschreven.
+
+Nieuwe offlinebestanden worden bij elke upgrade bijgewerkt:
+
+```bash
+/opt/digitalsignage/offline/index.html
+/opt/digitalsignage/offline/offline.css
+```
 
 Ook de desktopachtergrond wordt bij een upgrade idempotent bijgewerkt. Nieuwe
 installaties krijgen standaard:

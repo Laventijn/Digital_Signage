@@ -10,7 +10,7 @@ Het doelplatform is Raspberry Pi OS Trixie 64-bit met Wayland/labwc en Chromium 
 - Systemd servicebestanden staan in `services/`.
 - Voorbeeldconfiguratie staat in `config/`.
 - De vaste desktopachtergrond staat in `assets/wallpapers/`.
-- Offline fallbackpagina staat in `web/offline/`.
+- Offline fallbackpagina staat in `assets/offline/` en wordt geinstalleerd naar `/opt/digitalsignage/offline/`.
 
 ## Snelle start
 
@@ -81,7 +81,29 @@ systemctl --user status digitalsignage-health.timer --no-pager
 systemctl --user list-timers --all | grep digitalsignage
 tail -20 ~/.local/state/digitalsignage/health.log
 cat ~/.local/state/digitalsignage/health-state.json
+cat ~/.local/state/digitalsignage/connectivity.state
 journalctl --user -u digitalsignage-health.service -n 50 --no-pager
+```
+
+## Offline Gedrag
+
+De health-check controleert internet via NetworkManager en een HTTP-controle.
+Alleen `nmcli -t -f CONNECTIVITY general` met waarde `full` plus een geslaagde
+HTTP-controle naar `CONNECTIVITY_CHECK_URL` telt als online. Bij kort
+internetverlies blijft de huidige Chromium-pagina zichtbaar. Na standaard
+`OFFLINE_AFTER_SECONDS=300` seconden bevestigd offline navigeert Chromium een
+keer naar:
+
+```bash
+file:///opt/digitalsignage/offline/index.html
+```
+
+Wanneer internet terug is, wacht de kiosk standaard
+`ONLINE_CONFIRM_SECONDS=30` seconden voordat hij teruggaat naar
+`PRESENTATION_URL`. Uitschakelen kan met:
+
+```ini
+OFFLINE_PAGE_ENABLED=false
 ```
 
 Tijdelijk uitschakelen:

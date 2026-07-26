@@ -35,7 +35,7 @@ class HealthCheckTests(unittest.TestCase):
         raw = dict(health.DEFAULTS)
         raw.update({
             "PRESENTATION_URL": "https://docs.google.com/presentation/d/abc123/present?start=true&loop=true",
-            "OFFLINE_URL": "file:///opt/digitalsignage/web/offline/index.html",
+            "OFFLINE_PAGE_URL": "file:///opt/digitalsignage/offline/index.html",
             "KIOSK_USER": "kiosk",
         })
         return health.build_config(raw)
@@ -75,10 +75,10 @@ class HealthCheckTests(unittest.TestCase):
             "google_slides",
         )
         self.assertEqual(
-            health.is_valid_kiosk_url(config.offline_url, config.presentation_url, config.offline_url),
+            health.is_valid_kiosk_url(config.offline_page_url, config.presentation_url, config.offline_page_url),
             "offline",
         )
-        self.assertIsNone(health.is_valid_kiosk_url("https://example.org", config.presentation_url, config.offline_url))
+        self.assertIsNone(health.is_valid_kiosk_url("https://example.org", config.presentation_url, config.offline_page_url))
 
     def test_corrupt_state_is_recovered(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -179,6 +179,173 @@ class HealthCheckTests(unittest.TestCase):
         self.assertEqual(action, "none")
         self.assertEqual(skipped, "check_only")
         self.assertGreaterEqual(new_state["consecutive_failures"], config.failure_threshold)
+
+    def test_networkmanager_full_and_http_ok_is_online(self):
+        config = self.make_config()
+        with mock.patch.object(health, "check_networkmanager", return_value=(True, "full", "none")), \
+             mock.patch.object(health, "check_http", return_value=(True, "ok", "none")):
+            result = health.evaluate_connectivity(config)
+        self.assertTrue(result.online)
+        self.assertEqual(result.status, "online")
+
+    def test_networkmanager_limited_is_offline(self):
+        config = self.make_config()
+        with mock.patch.object(health, "check_networkmanager", return_value=(False, "limited", "networkmanager_limited")), \
+             mock.patch.object(health, "check_http", return_value=(True, "ok", "none")):
+            result = health.evaluate_connectivity(config)
+        self.assertFalse(result.online)
+        self.assertEqual(result.reason, "networkmanager_limited")
+
+    def test_networkmanager_failure_does_not_crash(self):
+        with mock.patch.object(health.subprocess, "run", side_effect=OSError("nmcli ontbreekt")):
+            ok, status, reason = health.check_networkmanager()
+        self.assertFalse(ok)
+        self.assertEqual(status, "failed")
+        self.assertEqual(reason, "networkmanager_failed")
+
+    def test_http_failure_is_offline(self):
+        config = self.make_config()
+        with mock.patch.object(health, "check_networkmanager", return_value=(True, "full", "none")), \
+             mock.patch.object(health, "check_http", return_value=(False, "failed", "http_failed")):
+            result = health.evaluate_connectivity(config)
+        self.assertFalse(result.online)
+        self.assertEqual(result.reason, "http_failed")
+
+    def test_first_offline_check_sets_offline_since_and_keeps_page(self):
+        config = self.make_config()
+        browser = health.CheckResult(True, "ok", page_url=config.presentation_url, websocket_url="ws://x")
+        connectivity = health.ConnectivityResult(False, "offline", "none", "failed", "networkmanager_none")
+        action = health.process_connectivity(dict(health.DEFAULT_CONNECTIVITY_STATE), connectivity, browser, config, 1000, True)
+        self.assertEqual(action.state["OFFLINE_SINCE"], 1000)
+        self.assertEqual(action.action, "keep_current_page")
+
+    def test_recovery_before_offline_threshold_never_shows_page(self):
+        config = self.make_config()
+        browser = health.CheckResult(True, "ok", page_url=config.presentation_url, websocket_url="ws://x")
+        state = dict(health.DEFAULT_CONNECTIVITY_STATE)
+        state["STATUS"] = "offline"
+        state["OFFLINE_SINCE"] = 1000
+        connectivity = health.ConnectivityResult(True, "online", "full", "ok", "none")
+        action = health.process_connectivity(state, connectivity, browser, config, 1010, True)
+        self.assertEqual(action.action, "wait_online_confirmation")
+        self.assertFalse(action.state["OFFLINE_PAGE_SHOWN"])
+
+    def test_offline_threshold_opens_offline_page_once(self):
+        config = self.make_config()
+        browser = health.CheckResult(True, "ok", page_url=config.presentation_url, websocket_url="ws://x")
+        state = dict(health.DEFAULT_CONNECTIVITY_STATE)
+        state["STATUS"] = "offline"
+        state["OFFLINE_SINCE"] = 1000
+        connectivity = health.ConnectivityResult(False, "offline", "none", "failed", "networkmanager_none")
+        with mock.patch.object(health, "navigate_if_needed", return_value=(True, "ok")) as navigate:
+            action = health.process_connectivity(state, connectivity, browser, config, 1300, True)
+        self.assertEqual(action.action, "show_offline_page")
+        self.assertTrue(action.state["OFFLINE_PAGE_SHOWN"])
+        navigate.assert_called_once()
+
+    def test_offline_page_already_visible_is_not_reloaded(self):
+        config = self.make_config()
+        browser = health.CheckResult(True, "ok", page_url=config.offline_page_url, websocket_url="ws://x")
+        state = dict(health.DEFAULT_CONNECTIVITY_STATE)
+        state["STATUS"] = "offline"
+        state["OFFLINE_SINCE"] = 1000
+        state["OFFLINE_PAGE_SHOWN"] = True
+        connectivity = health.ConnectivityResult(False, "offline", "none", "failed", "networkmanager_none")
+        with mock.patch.object(health, "navigate_if_needed") as navigate:
+            action = health.process_connectivity(state, connectivity, browser, config, 1300, True)
+        self.assertEqual(action.action, "none")
+        self.assertEqual(action.reason, "offline_page_already_visible")
+        navigate.assert_not_called()
+
+    def test_online_confirmation_waits_then_restores_kiosk(self):
+        config = self.make_config()
+        browser = health.CheckResult(True, "ok", page_url=config.offline_page_url, websocket_url="ws://x")
+        state = dict(health.DEFAULT_CONNECTIVITY_STATE)
+        state["STATUS"] = "offline"
+        state["OFFLINE_SINCE"] = 1000
+        state["ONLINE_SINCE"] = 1200
+        state["OFFLINE_PAGE_SHOWN"] = True
+        connectivity = health.ConnectivityResult(True, "online", "full", "ok", "none")
+        with mock.patch.object(health, "navigate_if_needed", return_value=(True, "ok")) as navigate:
+            action = health.process_connectivity(state, connectivity, browser, config, 1230, True)
+        self.assertEqual(action.action, "show_kiosk_page")
+        self.assertEqual(action.state["STATUS"], "online")
+        self.assertFalse(action.state["OFFLINE_PAGE_SHOWN"])
+        navigate.assert_called_once()
+
+    def test_kiosk_page_already_visible_is_not_reopened(self):
+        config = self.make_config()
+        browser = health.CheckResult(True, "ok", page_url=config.presentation_url, websocket_url="ws://x")
+        state = dict(health.DEFAULT_CONNECTIVITY_STATE)
+        state["STATUS"] = "offline"
+        state["OFFLINE_SINCE"] = 1000
+        state["ONLINE_SINCE"] = 1200
+        state["OFFLINE_PAGE_SHOWN"] = True
+        connectivity = health.ConnectivityResult(True, "online", "full", "ok", "none")
+        with mock.patch.object(health, "navigate_if_needed") as navigate:
+            action = health.process_connectivity(state, connectivity, browser, config, 1230, True)
+        self.assertEqual(action.action, "none")
+        self.assertEqual(action.reason, "kiosk_page_already_visible")
+        navigate.assert_not_called()
+
+    def test_corrupt_connectivity_state_uses_safe_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "connectivity.state"
+            path.write_text("STATUS=bad\nOFFLINE_SINCE=abc\nUNKNOWN=$(touch /tmp/nope)\nOFFLINE_PAGE_SHOWN=maybe\n", encoding="utf-8")
+            state, warning = health.load_connectivity_state(path, 1000)
+        self.assertEqual(state["STATUS"], "online")
+        self.assertEqual(state["OFFLINE_SINCE"], 0)
+        self.assertFalse(state["OFFLINE_PAGE_SHOWN"])
+        self.assertIsNone(warning)
+
+    def test_invalid_offline_config_values_warn_and_use_defaults(self):
+        config = health.build_config({
+            "OFFLINE_AFTER_SECONDS": "0",
+            "ONLINE_CONFIRM_SECONDS": "-1",
+            "CONNECTIVITY_TIMEOUT_SECONDS": "x",
+            "OFFLINE_PAGE_ENABLED": "misschien",
+        })
+        self.assertEqual(config.offline_after_seconds, 300)
+        self.assertEqual(config.online_confirm_seconds, 30)
+        self.assertEqual(config.connectivity_timeout_seconds, 8)
+        self.assertTrue(config.offline_page_enabled)
+        self.assertGreaterEqual(len(config.warnings), 4)
+
+    def test_offline_page_disabled_never_navigates(self):
+        raw = dict(health.DEFAULTS)
+        raw.update({"OFFLINE_PAGE_ENABLED": "false"})
+        config = health.build_config(raw)
+        browser = health.CheckResult(True, "ok", page_url=config.presentation_url, websocket_url="ws://x")
+        state = dict(health.DEFAULT_CONNECTIVITY_STATE)
+        state["OFFLINE_SINCE"] = 1000
+        connectivity = health.ConnectivityResult(False, "offline", "none", "failed", "networkmanager_none")
+        with mock.patch.object(health, "navigate_if_needed") as navigate:
+            action = health.process_connectivity(state, connectivity, browser, config, 2000, True)
+        self.assertEqual(action.action, "keep_current_page")
+        self.assertEqual(action.reason, "offline_page_disabled")
+        navigate.assert_not_called()
+
+    def test_special_url_is_serialized_as_valid_json(self):
+        browser = health.CheckResult(True, "ok", page_url="https://example.invalid", websocket_url="ws://x")
+        target_url = 'https://example.org/present?x="waarde"&y=1 2'
+        sent: list[str] = []
+
+        class FakeWs:
+            def send(self, payload):
+                sent.append(payload)
+
+            def recv(self):
+                return '{"id": 1}'
+
+            def close(self):
+                return None
+
+        with mock.patch.object(health, "websocket") as websocket_mock:
+            websocket_mock.create_connection.return_value = FakeWs()
+            websocket_mock.WebSocketException = Exception
+            ok, message = health.navigate_if_needed(browser, target_url)
+        self.assertTrue(ok, message)
+        self.assertEqual(json.loads(sent[0])["params"]["url"], target_url)
 
 
 if __name__ == "__main__":
