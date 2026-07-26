@@ -633,11 +633,6 @@ run_test_script tests/pre-install-test.sh
 run_test_script tests/test-installation.sh
 run_test_script tests/test-upgrade-config-merge.sh
 run_test_script tests/test-desktop-background.sh
-if [ -f tests/post-install-test.sh ]; then
-  run_test_script tests/post-install-test.sh
-else
-  skipped "tests/post-install-test.sh ontbreekt"
-fi
 
 section "5. Repositoryconfiguratie controleren"
 REPO_CONFIG="config/digitalsignage.conf.example"
@@ -716,18 +711,41 @@ case "$(read_config_value OFFLINE_PAGE_URL "${ACTIVE_CONFIG}")" in
   *) warning "OFFLINE_PAGE_URL gebruikt geen file://: $(read_config_value OFFLINE_PAGE_URL "${ACTIVE_CONFIG}")" ;;
 esac
 
-section "10. Healthtimer-regressie"
+section "10. Post-installatiecontrole na upgrade"
+systemctl --user daemon-reload && ok "systemd user-daemon opnieuw geladen" || { failure "systemd user-daemon kon niet opnieuw laden"; LIVE_TEST_ALLOWED=false; }
+systemctl --user is-active --quiet digitalsignage-kiosk.service && ok "Kioskservice is actief voor post-installatiecontrole" || { failure "Kioskservice is niet actief voor post-installatiecontrole"; LIVE_TEST_ALLOWED=false; }
+systemctl --user is-active --quiet digitalsignage-health.timer && ok "Healthtimer is actief voor post-installatiecontrole" || { failure "Healthtimer is niet actief voor post-installatiecontrole"; LIVE_TEST_ALLOWED=false; }
+if [ -f tests/post-install-test.sh ]; then
+  if bash tests/post-install-test.sh; then
+    ok "Post-installatiecontrole na upgrade geslaagd"
+  else
+    failure "Post-installatiecontrole na upgrade gefaald; live simulatie wordt niet gestart"
+    LIVE_TEST_ALLOWED=false
+  fi
+else
+  failure "tests/post-install-test.sh ontbreekt"
+  LIVE_TEST_ALLOWED=false
+fi
+
+section "11. Healthtimer-regressie"
+health_seconds="$(read_config_value HEALTH_CHECK_SECONDS "${ACTIVE_CONFIG}")"
+health_seconds="${health_seconds:-60}"
 systemctl --user cat digitalsignage-health.timer || failure "Kan healthtimer-unit niet tonen"
-systemctl --user show digitalsignage-health.timer --property=TimersMonotonic --property=ActiveState --property=SubState --property=NextElapseUSecMonotonic || failure "Kan healthtimer-eigenschappen niet tonen"
-timer_show="$(systemctl --user show digitalsignage-health.timer --property=TimersMonotonic --property=ActiveState --property=SubState --property=NextElapseUSecMonotonic 2>/dev/null || true)"
+systemctl --user show digitalsignage-health.timer --property=TimersMonotonic --property=ActiveState --property=SubState --property=NextElapseUSecMonotonic --property=LastTriggerUSec || failure "Kan healthtimer-eigenschappen niet tonen"
+timer_show="$(systemctl --user show digitalsignage-health.timer --property=TimersMonotonic --property=ActiveState --property=SubState --property=NextElapseUSecMonotonic --property=LastTriggerUSec 2>/dev/null || true)"
 printf '%s\n' "${timer_show}" | grep -F 'OnActiveUSec=2min' >/dev/null && ok "Healthtimer bevat OnActiveUSec=2min" || failure "Healthtimer mist OnActiveUSec=2min"
-printf '%s\n' "${timer_show}" | grep -F 'OnUnitInactiveUSec=1min' >/dev/null && ok "Healthtimer bevat OnUnitInactiveUSec=1min" || failure "Healthtimer mist OnUnitInactiveUSec=1min"
+if [ "${health_seconds}" = "60" ]; then
+  printf '%s\n' "${timer_show}" | grep -E 'OnUnitInactiveUSec=(60s|1min)' >/dev/null && ok "Healthtimer gebruikt HEALTH_CHECK_SECONDS=60" || failure "Healthtimer mist OnUnitInactiveUSec=1min"
+else
+  printf '%s\n' "${timer_show}" | grep -F "OnUnitInactiveUSec=${health_seconds}s" >/dev/null && ok "Healthtimer gebruikt HEALTH_CHECK_SECONDS=${health_seconds}" || failure "Healthtimer mist OnUnitInactiveUSec=${health_seconds}s"
+fi
 printf '%s\n' "${timer_show}" | grep -F 'ActiveState=active' >/dev/null && ok "Healthtimer ActiveState=active" || failure "Healthtimer is niet active"
 printf '%s\n' "${timer_show}" | grep -F 'SubState=waiting' >/dev/null && ok "Healthtimer SubState=waiting" || failure "Healthtimer is niet waiting"
+printf '%s\n' "${timer_show}" | grep -E '^NextElapseUSecMonotonic=.+$' >/dev/null && ok "Healthtimer heeft een volgende monotone trigger gepland" || failure "Healthtimer heeft geen volgende monotone trigger gepland"
 systemctl --user list-timers --all | tee "${TEST_OUTPUT}" || true
-grep -F 'digitalsignage-health.timer' "${TEST_OUTPUT}" | grep -Fv 'n/a' >/dev/null && ok "Healthtimer heeft een toekomstige trigger" || failure "Healthtimer heeft geen duidelijke toekomstige trigger"
+awk '/digitalsignage-health.timer/ { found=1; if ($1 != "-" && $1 != "n/a") ok=1 } END { exit(found && ok ? 0 : 1) }' "${TEST_OUTPUT}" && ok "Healthtimer heeft een toekomstige trigger" || failure "Healthtimer heeft geen duidelijke toekomstige trigger"
 
-section "11. Normale online-healthcheck"
+section "12. Normale online-healthcheck"
 refresh_config_values
 if [ -z "${KIOSK_USER}" ] || [ -z "${KIOSK_HOME}" ]; then
   failure "Kioskgebruiker of homefolder kon niet worden bepaald"
@@ -762,7 +780,7 @@ fi
 printf '%s\n' "${last_line}" | grep -F 'action=' >/dev/null && ok "Healthlog bevat action-veld" || failure "Healthlog mist action-veld"
 printf '%s\n' "${last_line}" | grep -F 'reason=' >/dev/null && ok "Healthlog bevat reason-veld" || failure "Healthlog mist reason-veld"
 
-section "12. Chromium-URL uitlezen"
+section "13. Chromium-URL uitlezen"
 ORIGINAL_KIOSK_PID="$(current_kiosk_pid)"
 ORIGINAL_URL="$(get_current_url 2>/dev/null || true)"
 printf 'MainPID=%s\n' "${ORIGINAL_KIOSK_PID}"
@@ -782,13 +800,13 @@ fi
 systemctl --user is-active --quiet digitalsignage-kiosk.service && ok "Kioskservice is actief voor live proef" || { failure "Kioskservice is niet actief voor live proef"; LIVE_TEST_ALLOWED=false; }
 
 if [ "${TEST_MODE}" = "safe-only" ]; then
-  section "13. Veilige offline- en herstelproef"
+  section "14. Veilige offline- en herstelproef"
   skipped "--safe-only: live simulatie met .invalid-URL overgeslagen"
 elif [ "${LIVE_TEST_ALLOWED}" != true ] || [ "${ESSENTIAL_MISSING}" = true ]; then
-  section "13. Veilige offline- en herstelproef"
+  section "14. Veilige offline- en herstelproef"
   skipped "Live proef overgeslagen omdat essentiële voorwaarden ontbreken"
 else
-  section "13. Veilige offline- en herstelproef"
+  section "14. Veilige offline- en herstelproef"
   LIVE_TEST_STARTED=true
   ORIGINAL_CONFIG_SUM="$(sha256sum "${ACTIVE_CONFIG}" | awk '{ print $1 }')"
   if sudo cp -p "${ACTIVE_CONFIG}" "${CONFIG_BACKUP}"; then
@@ -885,7 +903,7 @@ else
   grep -F "${INVALID_TEST_URL}" "${ACTIVE_CONFIG}" >/dev/null && failure ".invalid-URL staat nog in actieve configuratie" || ok ".invalid-URL is verwijderd uit actieve configuratie"
   start_health_once && ok "Normale online healthcheck na herstel uitgevoerd" || warning "Normale online healthcheck na herstel faalde"
 
-  section "14. Nieuwe healthlogregels van live proef"
+  section "15. Nieuwe healthlogregels van live proef"
   new_health_lines "${live_log_start}" | tail -20
   new_lines="$(new_health_lines "${live_log_start}")"
   printf '%s\n' "${new_lines}" | grep -F 'network=online' >/dev/null && ok "Nieuwe logs bevatten normale onlinecontrole" || warning "Nieuwe logs bevatten geen normale onlinecontrole"
@@ -896,7 +914,7 @@ else
   printf '%s\n' "${new_lines}" | grep -F 'show_kiosk_page' >/dev/null && ok "Nieuwe logs bevatten terugkeer naar kioskpagina" || warning "Nieuwe logs bevatten geen terugkeer naar kioskpagina"
 fi
 
-section "15. Tweede upgrade en idempotentie"
+section "16. Tweede upgrade en idempotentie"
 OFFLINE_CHECKSUM_BEFORE="$(sha256sum /opt/digitalsignage/offline/index.html 2>/dev/null | awk '{ print $1 }')"
 OFFLINE_CSS_CHECKSUM_BEFORE="$(sha256sum /opt/digitalsignage/offline/offline.css 2>/dev/null | awk '{ print $1 }')"
 if sudo bash install/upgrade.sh; then
@@ -912,7 +930,7 @@ done
 systemctl --user is-active --quiet digitalsignage-kiosk.service && ok "Kioskservice blijft actief na tweede upgrade" || failure "Kioskservice is niet actief na tweede upgrade"
 systemctl --user is-active --quiet digitalsignage-health.timer && ok "Healthtimer blijft actief na tweede upgrade" || failure "Healthtimer is niet actief na tweede upgrade"
 
-section "16. Healthlogcontrole"
+section "17. Healthlogcontrole"
 if [ -f "${HEALTH_LOG}" ]; then
   tail -20 "${HEALTH_LOG}"
 else

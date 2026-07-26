@@ -275,10 +275,14 @@ test_user_systemd() {
 
 test_chromium() {
   local failed=0
-  local presentation_url presentation_id cmdline pid
-  presentation_url="$(read_config_value PRESENTATION_URL "${CONFIG_FILE}")"
-  presentation_id="$(extract_slides_id "${presentation_url}")"
+  local cmdline pid debug_host debug_port profile_dir cache_dir expected_profile expected_cache option
   pid="$(get_user_unit_property digitalsignage-kiosk.service MainPID)"
+  debug_host="$(read_config_value REMOTE_DEBUG_HOST "${CONFIG_FILE}")"
+  debug_port="$(read_config_value REMOTE_DEBUG_PORT "${CONFIG_FILE}")"
+  profile_dir="$(read_config_value CHROMIUM_PROFILE_DIR "${CONFIG_FILE}")"
+  cache_dir="$(read_config_value CHROMIUM_CACHE_DIR "${CONFIG_FILE}")"
+  debug_host="${debug_host:-127.0.0.1}"
+  debug_port="${debug_port:-9222}"
 
   if ! printf '%s\n' "${pid}" | grep -E '^[0-9]+$' >/dev/null; then
     log_error "MainPID van digitalsignage-kiosk.service is niet numeriek: ${pid:-leeg}"
@@ -297,9 +301,8 @@ test_chromium() {
   cmdline="$(tr '\0' ' ' < "/proc/${pid}/cmdline")"
   log_info "Chromium commandline: ${cmdline}"
 
-  local option
   printf '%s\n' "${cmdline}" | grep -F 'chromium' >/dev/null && log_ok "Chromium-binary in commandline" || { log_error "Commandline bevat geen chromium"; failed=1; }
-  for option in '--kiosk' '--ozone-platform=wayland' '--disable-gpu' '--remote-debugging-address=127.0.0.1' '--remote-debugging-port=9222'; do
+  for option in '--kiosk' '--ozone-platform=wayland' '--disable-gpu' "--remote-debugging-address=${debug_host}" "--remote-debugging-port=${debug_port}"; do
     if printf '%s\n' "${cmdline}" | grep -F -- "${option}" >/dev/null; then
       log_ok "Chromium-optie aanwezig: ${option}"
     else
@@ -308,13 +311,18 @@ test_chromium() {
     fi
   done
 
-  if [ -n "${presentation_url}" ] && printf '%s\n' "${cmdline}" | grep -F -- "${presentation_url}" >/dev/null; then
-    log_ok "Presentatie-URL staat in Chromium commandline"
-  elif [ -n "${presentation_id}" ] && printf '%s\n' "${cmdline}" | grep -F -- "${presentation_id}" >/dev/null; then
-    log_ok "Google Slides-presentatie-ID staat in Chromium commandline"
+  if [ -n "${profile_dir}" ]; then
+    expected_profile="${KIOSK_HOME}/${profile_dir}"
+    printf '%s\n' "${cmdline}" | grep -F -- "--user-data-dir=${expected_profile}" >/dev/null && log_ok "Chromium-profielargument aanwezig" || { log_error "Chromium-profielargument ontbreekt: --user-data-dir=${expected_profile}"; failed=1; }
   else
-    log_error "Presentatie-URL of Google Slides-presentatie-ID ontbreekt in Chromium commandline"
-    failed=1
+    printf '%s\n' "${cmdline}" | grep -F -- '--user-data-dir=' >/dev/null && log_ok "Chromium-profielargument aanwezig" || { log_error "Chromium-profielargument ontbreekt"; failed=1; }
+  fi
+
+  if [ -n "${cache_dir}" ]; then
+    expected_cache="${KIOSK_HOME}/${cache_dir}"
+    printf '%s\n' "${cmdline}" | grep -F -- "--disk-cache-dir=${expected_cache}" >/dev/null && log_ok "Chromium-cacheargument aanwezig" || { log_error "Chromium-cacheargument ontbreekt: --disk-cache-dir=${expected_cache}"; failed=1; }
+  else
+    printf '%s\n' "${cmdline}" | grep -F -- '--disk-cache-dir=' >/dev/null && log_ok "Chromium-cacheargument aanwezig" || { log_error "Chromium-cacheargument ontbreekt"; failed=1; }
   fi
 
   return "${failed}"
@@ -322,19 +330,89 @@ test_chromium() {
 
 test_debug_port() {
   local failed=0
-  local output
-  output="$(curl --silent --show-error --max-time 3 http://127.0.0.1:9222/json 2>&1)"
+  local presentation_url offline_page_url debug_host debug_port result
+  presentation_url="$(read_config_value PRESENTATION_URL "${CONFIG_FILE}")"
+  offline_page_url="$(read_config_value OFFLINE_PAGE_URL "${CONFIG_FILE}")"
+  debug_host="$(read_config_value REMOTE_DEBUG_HOST "${CONFIG_FILE}")"
+  debug_port="$(read_config_value REMOTE_DEBUG_PORT "${CONFIG_FILE}")"
+  offline_page_url="${offline_page_url:-file:///opt/digitalsignage/offline/index.html}"
+  debug_host="${debug_host:-127.0.0.1}"
+  debug_port="${debug_port:-9222}"
+
+  result="$(python3 - "${debug_host}" "${debug_port}" "${presentation_url}" "${offline_page_url}" <<'PY'
+import json
+import re
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+host, port, presentation_url, offline_page_url = sys.argv[1:5]
+
+def slides_id(value):
+    match = re.search(r"/presentation/d/([^/]+)", urllib.parse.urlparse(value).path)
+    return match.group(1) if match else None
+
+def normalized(value):
+    parsed = urllib.parse.urlparse(value)
+    return (parsed.scheme.lower(), parsed.netloc.lower(), parsed.path.rstrip("/"))
+
+try:
+    with urllib.request.urlopen(f"http://{host}:{port}/json", timeout=5) as response:
+        targets = json.loads(response.read().decode("utf-8"))
+except (urllib.error.URLError, TimeoutError, OSError) as exc:
+    print(f"ERROR endpoint:{exc}")
+    sys.exit(1)
+except json.JSONDecodeError as exc:
+    print(f"ERROR json:{exc}")
+    sys.exit(1)
+
+if not isinstance(targets, list):
+    print("ERROR json:debugpoort gaf geen JSON-lijst")
+    sys.exit(1)
+
+page_urls = [str(target.get("url", "")).strip() for target in targets if target.get("type") == "page"]
+if not page_urls:
+    print("ERROR pages:geen Chromium page-target gevonden")
+    sys.exit(1)
+
+configured_slides_id = slides_id(presentation_url)
+for url in page_urls:
+    if offline_page_url and normalized(url) == normalized(offline_page_url):
+        print(f"OK offline {url}")
+        sys.exit(0)
+    if presentation_url and normalized(url) == normalized(presentation_url):
+        print(f"OK slides {url}")
+        sys.exit(0)
+    if configured_slides_id and slides_id(url) == configured_slides_id:
+        print(f"OK slides {url}")
+        sys.exit(0)
+
+print("ERROR kiosk:geen relevante kioskpagina gevonden")
+for url in page_urls:
+    print(f"PAGE {url}")
+sys.exit(1)
+PY
+)"
   if [ $? -ne 0 ]; then
-    printf '%s\n' "${output}"
-    log_error "Debugpoort reageert niet"
+    printf '%s\n' "${result}"
+    log_error "Debugpoort bevat geen geldige actuele kioskpagina"
     return 1
   fi
-  printf '%s\n' "${output}" | head -c 1000
-  printf '\n'
 
-  printf '%s\n' "${output}" | grep -F '"type": "page"' >/dev/null && log_ok "Minstens een page-target gevonden" || { log_error "Geen page-target gevonden"; failed=1; }
-  printf '%s\n' "${output}" | grep -F 'docs.google.com/presentation/' >/dev/null && log_ok "Google Slides-target gevonden" || { log_error "Geen Google Slides-target gevonden"; failed=1; }
-  printf '%s\n' "${output}" | grep -F 'webSocketDebuggerUrl' >/dev/null && log_ok "webSocketDebuggerUrl aanwezig" || { log_error "webSocketDebuggerUrl ontbreekt"; failed=1; }
+  printf '%s\n' "${result}"
+  case "${result}" in
+    "OK slides "*)
+      log_ok "Actuele Chromium-pagina is Google Slides"
+      ;;
+    "OK offline "*)
+      log_ok "Actuele Chromium-pagina is de lokale offlinepagina"
+      ;;
+    *)
+      log_error "Onverwachte debugpoortclassificatie: ${result}"
+      failed=1
+      ;;
+  esac
   return "${failed}"
 }
 
@@ -450,7 +528,7 @@ test_health_check() {
 }
 
 test_timer() {
-  local failed=0 health_properties sub_state next_elapse
+  local failed=0 health_properties sub_state active_state next_elapse timers_monotonic timers_output health_seconds
   run_user_systemctl list-timers --all --no-pager | grep digitalsignage || true
   if run_user_systemctl list-timers --all --no-pager | grep -F 'digitalsignage-refresh.timer' >/dev/null; then
     log_ok "Refreshtimer heeft timerinformatie"
@@ -476,12 +554,27 @@ test_timer() {
     return 1
   }
   sleep 2
-  health_properties="$(run_user_systemctl show digitalsignage-health.timer --property=ActiveState --property=SubState --property=NextElapseUSecRealtime --property=LastTriggerUSec --no-pager 2>&1 || true)"
+  health_properties="$(run_user_systemctl show digitalsignage-health.timer --property=TimersMonotonic --property=ActiveState --property=SubState --property=NextElapseUSecMonotonic --property=LastTriggerUSec --no-pager 2>&1 || true)"
   printf '%s\n' "${health_properties}"
+  active_state="$(printf '%s\n' "${health_properties}" | awk -F= '$1 == "ActiveState" { print $2 }')"
   sub_state="$(printf '%s\n' "${health_properties}" | awk -F= '$1 == "SubState" { print $2 }')"
-  next_elapse="$(printf '%s\n' "${health_properties}" | awk -F= '$1 == "NextElapseUSecRealtime" { print $2 }')"
+  next_elapse="$(printf '%s\n' "${health_properties}" | awk -F= '$1 == "NextElapseUSecMonotonic" { print $2 }')"
+  timers_monotonic="$(printf '%s\n' "${health_properties}" | awk -F= '$1 == "TimersMonotonic" { print substr($0, index($0, "=") + 1) }')"
+  health_seconds="$(read_config_value HEALTH_CHECK_SECONDS "${CONFIG_FILE}")"
+  health_seconds="${health_seconds:-60}"
+  [ "${active_state}" = "active" ] && log_ok "Healthtimer ActiveState=active" || { log_error "Healthtimer ActiveState is ${active_state:-leeg}, verwacht active"; failed=1; }
   [ "${sub_state}" != "elapsed" ] && log_ok "Healthtimer blijft niet hangen in SubState=elapsed" || { log_error "Healthtimer staat in SubState=elapsed"; failed=1; }
-  [ -n "${next_elapse}" ] && log_ok "Healthtimer heeft een volgende trigger gepland" || { log_error "Healthtimer heeft geen NextElapseUSecRealtime"; failed=1; }
+  [ "${sub_state}" = "waiting" ] && log_ok "Healthtimer SubState=waiting" || { log_error "Healthtimer SubState is ${sub_state:-leeg}, verwacht waiting"; failed=1; }
+  [ -n "${next_elapse}" ] && log_ok "Healthtimer heeft een volgende monotone trigger gepland" || { log_error "Healthtimer heeft geen volgende monotone trigger gepland"; failed=1; }
+  printf '%s\n' "${timers_monotonic}" | grep -F 'OnActiveUSec=2min' >/dev/null && log_ok "Healthtimer TimersMonotonic bevat OnActiveUSec=2min" || { log_error "Healthtimer TimersMonotonic mist OnActiveUSec=2min"; failed=1; }
+  if [ "${health_seconds}" = "60" ]; then
+    printf '%s\n' "${timers_monotonic}" | grep -E 'OnUnitInactiveUSec=(60s|1min)' >/dev/null && log_ok "Healthtimer TimersMonotonic gebruikt HEALTH_CHECK_SECONDS=60" || { log_error "Healthtimer TimersMonotonic mist OnUnitInactiveUSec=1min"; failed=1; }
+  else
+    printf '%s\n' "${timers_monotonic}" | grep -F "OnUnitInactiveUSec=${health_seconds}s" >/dev/null && log_ok "Healthtimer TimersMonotonic gebruikt HEALTH_CHECK_SECONDS=${health_seconds}" || { log_error "Healthtimer TimersMonotonic mist OnUnitInactiveUSec=${health_seconds}s"; failed=1; }
+  fi
+
+  timers_output="$(run_user_systemctl list-timers --all --no-pager 2>&1 || true)"
+  printf '%s\n' "${timers_output}" | awk '/digitalsignage-health.timer/ { found=1; if ($1 != "-" && $1 != "n/a") ok=1 } END { exit(found && ok ? 0 : 1) }' && log_ok "Healthtimer heeft een echte toekomstige trigger in list-timers" || { log_error "Healthtimer heeft geen echte toekomstige trigger in list-timers"; failed=1; }
 
   return "${failed}"
 }
