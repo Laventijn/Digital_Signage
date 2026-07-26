@@ -4,6 +4,7 @@ set -Eeuo pipefail
 CONFIG_FILE="${CONFIG_FILE:-/etc/digitalsignage/digitalsignage.conf}"
 DEFAULT_BACKGROUND_FILE="/opt/digitalsignage/assets/wallpapers/digitalsignage-background.png"
 PCMANFM_PROFILE="LXDE-pi"
+DEFAULT_WAYLAND_DISPLAY="wayland-0"
 
 error() {
   echo "FOUT: $*" >&2
@@ -66,6 +67,11 @@ primary_group_for_user() {
   printf '%s\n' "${group:-${user}}"
 }
 
+primary_uid_for_user() {
+  local user="$1"
+  getent passwd "${user}" | awk -F: '{ print $3 }'
+}
+
 install_owned_dir() {
   local dir="$1"
   local user="$2"
@@ -106,6 +112,114 @@ determine_kiosk_home() {
   fi
 
   printf '%s\n' "${passwd_entry}" | awk -F: '{ print $6 }'
+}
+
+pcmanfm_desktop_is_active() {
+  local user="$1"
+
+  if [ "${DIGITALSIGNAGE_TEST_PCMANFM_ACTIVE:-}" = "1" ]; then
+    return 0
+  fi
+
+  [ -n "$(pcmanfm_desktop_pid "${user}")" ]
+}
+
+pcmanfm_desktop_pid() {
+  local user="$1"
+
+  command -v pgrep >/dev/null 2>&1 || return 1
+  pgrep -u "${user}" -a pcmanfm 2>/dev/null | awk '/--desktop/ { print $1; exit }'
+}
+
+process_environment_value() {
+  local pid="$1"
+  local key="$2"
+
+  [ -r "/proc/${pid}/environ" ] || return 0
+  tr '\0' '\n' <"/proc/${pid}/environ" | awk -F= -v key="${key}" '$1 == key { print substr($0, index($0, "=") + 1); exit }'
+}
+
+run_pcmanfm_wallpaper_command() {
+  local user="$1"
+  local uid="$2"
+  local wallpaper_file="$3"
+  local wallpaper_mode="$4"
+  local runtime_dir bus_path wayland_display display pcmanfm_pid
+  local -a env_args command_args
+
+  runtime_dir="${DIGITALSIGNAGE_TEST_XDG_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/run/user/${uid}}}"
+  bus_path="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${runtime_dir}/bus}"
+  wayland_display="${WAYLAND_DISPLAY:-${DEFAULT_WAYLAND_DISPLAY}}"
+  display="${DISPLAY:-}"
+  pcmanfm_pid="$(pcmanfm_desktop_pid "${user}" || true)"
+  if [ -n "${pcmanfm_pid}" ]; then
+    wayland_display="$(process_environment_value "${pcmanfm_pid}" WAYLAND_DISPLAY || true)"
+    wayland_display="${wayland_display:-${DEFAULT_WAYLAND_DISPLAY}}"
+    display="$(process_environment_value "${pcmanfm_pid}" DISPLAY || true)"
+  fi
+
+  if [ -z "${DIGITALSIGNAGE_TEST_PCMANFM_COMMAND_LOG:-}" ] && [ ! -d "${runtime_dir}" ]; then
+    warn "geen actieve gebruikersruntime gevonden: ${runtime_dir}; achtergrond wordt bij volgende desktopstart toegepast."
+    return 0
+  fi
+  if [ -z "${DIGITALSIGNAGE_TEST_PCMANFM_COMMAND_LOG:-}" ] && [ ! -S "${runtime_dir}/bus" ]; then
+    warn "geen user D-Bus gevonden: ${runtime_dir}/bus; achtergrond wordt bij volgende desktopstart toegepast."
+    return 0
+  fi
+  if ! pcmanfm_desktop_is_active "${user}"; then
+    info "Geen actieve pcmanfm --desktop gevonden; achtergrond wordt bij volgende desktopstart toegepast."
+    return 0
+  fi
+  if ! command -v pcmanfm >/dev/null 2>&1 && [ -z "${DIGITALSIGNAGE_TEST_PCMANFM_COMMAND_LOG:-}" ]; then
+    warn "pcmanfm is niet gevonden; achtergrond wordt bij volgende desktopstart toegepast."
+    return 0
+  fi
+
+  env_args=(
+    "XDG_RUNTIME_DIR=${runtime_dir}"
+    "DBUS_SESSION_BUS_ADDRESS=${bus_path}"
+    "WAYLAND_DISPLAY=${wayland_display}"
+  )
+  if [ -n "${display}" ]; then
+    env_args+=("DISPLAY=${display}")
+  fi
+
+  command_args=(
+    pcmanfm
+    --profile "${PCMANFM_PROFILE}"
+    --set-wallpaper="${wallpaper_file}"
+    --wallpaper-mode="${wallpaper_mode}"
+  )
+
+  if [ -n "${DIGITALSIGNAGE_TEST_PCMANFM_COMMAND_LOG:-}" ]; then
+    {
+      printf 'user=%s\n' "${user}"
+      printf 'env'
+      printf ' %q' "${env_args[@]}"
+      printf '\ncommand'
+      printf ' %q' "${command_args[@]}"
+      printf '\n'
+    } >>"${DIGITALSIGNAGE_TEST_PCMANFM_COMMAND_LOG}"
+    return 0
+  fi
+
+  if [ "$(id -u)" -eq 0 ]; then
+    if runuser -u "${user}" -- env "${env_args[@]}" "${command_args[@]}"; then
+      info "Actieve pcmanfm-desktop bijgewerkt."
+    else
+      warn "pcmanfm kon de actieve achtergrond niet onmiddellijk bijwerken; configuratiebestand is wel aangepast."
+    fi
+  else
+    if [ "$(id -un)" != "${user}" ]; then
+      warn "script draait niet als ${user}; actieve achtergrond wordt niet onder de verkeerde gebruiker aangepast."
+      return 0
+    fi
+    if env "${env_args[@]}" "${command_args[@]}"; then
+      info "Actieve pcmanfm-desktop bijgewerkt."
+    else
+      warn "pcmanfm kon de actieve achtergrond niet onmiddellijk bijwerken; configuratiebestand is wel aangepast."
+    fi
+  fi
 }
 
 write_pcmanfm_config() {
@@ -156,7 +270,7 @@ write_pcmanfm_config() {
 
 main() {
   local kiosk_user enabled background_file requested_mode wallpaper_mode
-  local kiosk_home kiosk_group desktop_dir desktop_config backup_file changed
+  local kiosk_home kiosk_group kiosk_uid desktop_dir desktop_config backup_file changed
 
   kiosk_user="$(read_config_value KIOSK_USER "${CONFIG_FILE}")"
   kiosk_user="${DIGITALSIGNAGE_TEST_KIOSK_USER:-${kiosk_user:-}}"
@@ -191,6 +305,10 @@ main() {
   if [ -z "${kiosk_group}" ]; then
     kiosk_group="$(primary_group_for_user "${kiosk_user}")"
   fi
+  kiosk_uid="${DIGITALSIGNAGE_TEST_KIOSK_UID:-}"
+  if [ -z "${kiosk_uid}" ]; then
+    kiosk_uid="$(primary_uid_for_user "${kiosk_user}")"
+  fi
 
   # Raspberry Pi OS Trixie met Desktop bewaart de labwc-sessieachtergrond via
   # de pcmanfm-desktopconfiguratie. We passen alleen dit gebruikersbestand aan
@@ -214,11 +332,12 @@ main() {
 
   if [ "${changed}" -eq 1 ]; then
     info "Desktopachtergrond ingesteld in ${desktop_config}."
-    info "De actieve desktop neemt dit uiterlijk bij de volgende desktopstart zichtbaar over."
   else
     [ -n "${backup_file:-}" ] && rm -f "${backup_file}"
     info "Desktopachtergrond was al correct ingesteld."
   fi
+
+  run_pcmanfm_wallpaper_command "${kiosk_user}" "${kiosk_uid}" "${background_file}" "${wallpaper_mode}"
 }
 
 main "$@"

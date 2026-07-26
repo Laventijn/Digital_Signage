@@ -35,6 +35,22 @@ run_configurator() {
     bash "${ROOT_DIR}/scripts/configure-desktop-background.sh"
 }
 
+run_configurator_with_pcmanfm_log() {
+  local config_file="$1"
+  local home_dir="$2"
+  local command_log="$3"
+
+  CONFIG_FILE="${config_file}" \
+  DIGITALSIGNAGE_TEST_KIOSK_USER="$(id -un)" \
+  DIGITALSIGNAGE_TEST_KIOSK_GROUP="$(id -gn)" \
+  DIGITALSIGNAGE_TEST_KIOSK_UID="$(id -u)" \
+  DIGITALSIGNAGE_TEST_KIOSK_HOME="${home_dir}" \
+  DIGITALSIGNAGE_TEST_XDG_RUNTIME_DIR="${TEST_TMP_DIR}/runtime" \
+  DIGITALSIGNAGE_TEST_PCMANFM_ACTIVE=1 \
+  DIGITALSIGNAGE_TEST_PCMANFM_COMMAND_LOG="${command_log}" \
+    bash "${ROOT_DIR}/scripts/configure-desktop-background.sh"
+}
+
 assert_contains() {
   local file="$1"
   local expected="$2"
@@ -123,7 +139,47 @@ test_missing_wallpaper_fails() {
   assert_contains "${output_file}" "Desktopachtergrondbestand ontbreekt"
 }
 
+test_pcmanfm_command_is_built() {
+  local home_dir="${TEST_TMP_DIR}/home-pcmanfm"
+  local wallpaper_file="${TEST_TMP_DIR}/pcmanfm-background.png"
+  local config_file="${TEST_TMP_DIR}/pcmanfm.conf"
+  local command_log="${TEST_TMP_DIR}/pcmanfm-command.log"
+
+  mkdir -p "${home_dir}" "${TEST_TMP_DIR}/runtime"
+  printf 'png\n' >"${wallpaper_file}"
+  write_config "${config_file}" "true" "${wallpaper_file}" "zoom"
+
+  run_configurator_with_pcmanfm_log "${config_file}" "${home_dir}" "${command_log}" >/dev/null
+
+  assert_contains "${command_log}" "XDG_RUNTIME_DIR=${TEST_TMP_DIR}/runtime"
+  assert_contains "${command_log}" "DBUS_SESSION_BUS_ADDRESS=unix:path=${TEST_TMP_DIR}/runtime/bus"
+  assert_contains "${command_log}" "WAYLAND_DISPLAY=wayland-0"
+  assert_contains "${command_log}" "command pcmanfm --profile LXDE-pi --set-wallpaper=${wallpaper_file} --wallpaper-mode=crop"
+}
+
+test_no_pcmanfm_command_when_desktop_inactive() {
+  local home_dir="${TEST_TMP_DIR}/home-no-pcmanfm"
+  local wallpaper_file="${TEST_TMP_DIR}/no-pcmanfm-background.png"
+  local config_file="${TEST_TMP_DIR}/no-pcmanfm.conf"
+  local command_log="${TEST_TMP_DIR}/no-pcmanfm-command.log"
+
+  mkdir -p "${home_dir}"
+  printf 'png\n' >"${wallpaper_file}"
+  write_config "${config_file}" "true" "${wallpaper_file}" "zoom"
+
+  CONFIG_FILE="${config_file}" \
+  DIGITALSIGNAGE_TEST_KIOSK_USER="$(id -un)" \
+  DIGITALSIGNAGE_TEST_KIOSK_GROUP="$(id -gn)" \
+  DIGITALSIGNAGE_TEST_KIOSK_HOME="${home_dir}" \
+  DIGITALSIGNAGE_TEST_PCMANFM_COMMAND_LOG="${command_log}" \
+    bash "${ROOT_DIR}/scripts/configure-desktop-background.sh" >/dev/null
+
+  [ ! -e "${command_log}" ]
+}
+
 test_sets_background_idempotently
 test_backup_existing_config
 test_disabled_does_not_change_config
 test_missing_wallpaper_fails
+test_pcmanfm_command_is_built
+test_no_pcmanfm_command_when_desktop_inactive

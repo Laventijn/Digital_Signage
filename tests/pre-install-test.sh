@@ -452,6 +452,18 @@ test_health_integration() {
   grep -q 'digitalsignage-health.timer' "${TEST_ROOT_DIR}/install/upgrade.sh" && log_ok "Upgrader werkt healthtimer bij" || { log_error "Upgrader verwerkt healthtimer niet"; failed=1; }
   grep -q 'digitalsignage-health.timer' "${TEST_ROOT_DIR}/install/uninstall.sh" && log_ok "Uninstaller verwijdert healthtimer" || { log_error "Uninstaller verwerkt healthtimer niet"; failed=1; }
   grep -q 'SuccessExitStatus=0 1' "${TEST_ROOT_DIR}/services/digitalsignage-health.service" && log_ok "Healthservice accepteert exitcode 1 als verwachte ongezonde status" || { log_error "SuccessExitStatus=0 1 ontbreekt"; failed=1; }
+  grep -q '^OnBootSec=2min$' "${TEST_ROOT_DIR}/services/digitalsignage-health.timer" && log_ok "Healthtimer heeft OnBootSec voor eerste run na reboot" || { log_error "Healthtimer mist OnBootSec=2min"; failed=1; }
+  grep -q '^OnUnitInactiveSec=60s$' "${TEST_ROOT_DIR}/services/digitalsignage-health.timer" && log_ok "Healthtimer gebruikt OnUnitInactiveSec" || { log_error "Healthtimer mist OnUnitInactiveSec=60s"; failed=1; }
+  if grep -q '^OnUnitActiveSec=60s$' "${TEST_ROOT_DIR}/services/digitalsignage-health.timer"; then
+    log_error "Healthtimer gebruikt nog actieve OnUnitActiveSec=60s"
+    failed=1
+  else
+    log_ok "Healthtimer gebruikt geen actieve OnUnitActiveSec=60s"
+  fi
+  grep -q '^OnUnitActiveSec=$' "${TEST_ROOT_DIR}/install/install.sh" && grep -q '^OnUnitInactiveSec=${interval}s$' "${TEST_ROOT_DIR}/install/install.sh" &&
+    log_ok "Installer-drop-in reset OnUnitActiveSec en gebruikt OnUnitInactiveSec" || { log_error "Installer-drop-in voor healthtimer is onjuist"; failed=1; }
+  grep -q '^OnUnitActiveSec=$' "${TEST_ROOT_DIR}/install/upgrade.sh" && grep -q '^OnUnitInactiveSec=${interval}s$' "${TEST_ROOT_DIR}/install/upgrade.sh" &&
+    log_ok "Upgrader-drop-in reset OnUnitActiveSec en gebruikt OnUnitInactiveSec" || { log_error "Upgrader-drop-in voor healthtimer is onjuist"; failed=1; }
 
   if grep -q 'sudo' "${TEST_ROOT_DIR}/scripts/health-check.py"; then
     log_error "health-check.py bevat sudo"

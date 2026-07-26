@@ -169,7 +169,8 @@ write_health_timer_dropin() {
   cat > "${dropin_dir}/interval.conf" <<EOF
 [Timer]
 OnUnitActiveSec=
-OnUnitActiveSec=${interval}s
+OnUnitInactiveSec=
+OnUnitInactiveSec=${interval}s
 EOF
 }
 
