@@ -42,6 +42,39 @@ Status bekijken:
 systemctl --user status digitalsignage-kiosk.service
 ```
 
+Kiosk tijdelijk stoppen:
+
+```bash
+systemctl --user stop digitalsignage-kiosk.service
+```
+
+Kiosk stoppen en voorkomen dat hij automatisch opnieuw start bij de volgende
+usersessie:
+
+```bash
+systemctl --user disable --now digitalsignage-kiosk.service
+```
+
+Let op: als de health-check actief blijft, kan die de kiosk later opnieuw
+starten. Stop daarom tijdelijk ook de healthtimer wanneer de kiosk bewust uit
+moet blijven:
+
+```bash
+systemctl --user disable --now digitalsignage-health.timer
+```
+
+Kiosk opnieuw inschakelen:
+
+```bash
+systemctl --user enable --now digitalsignage-kiosk.service
+```
+
+Health-check opnieuw inschakelen:
+
+```bash
+systemctl --user enable --now digitalsignage-health.timer
+```
+
 ## Refresh Timer, Resource-Logtimer En Healthtimer
 
 De Google Slides-refresh gebruikt een systemd user-timer voor de kioskgebruiker. Google Slides speelt zelf af en loopt via `loop=true`; de refresh haalt alleen periodiek wijzigingen op. Standaard gebeurt dat ongeveer iedere vijf minuten via `REFRESH_SECONDS=300`. RAM- en swaplogging gebruikt een aparte user-timer van 10 minuten. De health-check gebruikt een aparte user-timer van standaard 60 seconden. De unitbestanden worden geinstalleerd onder:
