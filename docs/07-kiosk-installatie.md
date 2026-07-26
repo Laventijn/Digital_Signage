@@ -14,13 +14,8 @@ gebruikersomgeving gecontroleerd moeten worden.
 De installer kopieert scripts, webbestanden, configuratie en systemd-units naar de juiste locaties.
 Daarnaast installeert de installer `python3` en `python3-websocket` wanneer `apt-get` beschikbaar is.
 
-De Chromium-kiosk draait als systemd user-service van `KIOSK_USER`, niet als globale systeemservice. De healthcheck-units blijven voorlopig globale systemd-units.
-
-Na installatie van de globale healthcheck:
-
-```bash
-sudo systemctl enable --now digitalsignage-healthcheck.timer
-```
+De Chromium-kiosk en de automatische health-check draaien als systemd
+user-services van `KIOSK_USER`, niet als globale systeemservices.
 
 ## Kiosk User-Service
 
@@ -43,9 +38,9 @@ Status bekijken:
 systemctl --user status digitalsignage-kiosk.service
 ```
 
-## Refresh Timer En Resource-Logtimer
+## Refresh Timer, Resource-Logtimer En Healthtimer
 
-De Google Slides-refresh gebruikt een systemd user-timer voor de kioskgebruiker. Google Slides speelt zelf af en loopt via `loop=true`; de refresh haalt alleen periodiek wijzigingen op. Standaard gebeurt dat ongeveer iedere vijf minuten via `REFRESH_SECONDS=300`. RAM- en swaplogging gebruikt een aparte user-timer van 10 minuten. De unitbestanden worden geinstalleerd onder:
+De Google Slides-refresh gebruikt een systemd user-timer voor de kioskgebruiker. Google Slides speelt zelf af en loopt via `loop=true`; de refresh haalt alleen periodiek wijzigingen op. Standaard gebeurt dat ongeveer iedere vijf minuten via `REFRESH_SECONDS=300`. RAM- en swaplogging gebruikt een aparte user-timer van 10 minuten. De health-check gebruikt een aparte user-timer van standaard 60 seconden. De unitbestanden worden geinstalleerd onder:
 
 ```bash
 ~/.config/systemd/user/
@@ -60,6 +55,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now digitalsignage-kiosk.service
 systemctl --user enable --now digitalsignage-refresh.timer
 systemctl --user enable --now digitalsignage-resource-log.timer
+systemctl --user enable --now digitalsignage-health.timer
 ```
 
 Status bekijken:
@@ -67,6 +63,7 @@ Status bekijken:
 ```bash
 systemctl --user status digitalsignage-refresh.timer
 systemctl --user status digitalsignage-resource-log.timer
+systemctl --user status digitalsignage-health.timer
 ```
 
 Op Raspberry Pi OS Trixie staan user-unitlogs soms vooral in de systeemjournal:
@@ -85,4 +82,10 @@ Handmatig een RAM- en swaplogregel schrijven:
 
 ```bash
 systemctl --user start digitalsignage-resource-log.service
+```
+
+Handmatig een health-check uitvoeren zonder automatische herstelactie:
+
+```bash
+/opt/digitalsignage/scripts/health-check.py --check-only
 ```

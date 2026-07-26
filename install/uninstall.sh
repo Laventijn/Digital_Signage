@@ -10,8 +10,19 @@ fi
 
 KIOSK_USER="bloemkool"
 if [ -f "${CONFIG_FILE}" ]; then
-  # shellcheck source=/dev/null
-  source "${CONFIG_FILE}"
+  configured_kiosk_user="$(awk -F= '
+    /^[[:space:]]*#/ { next }
+    $1 ~ /^[[:space:]]*KIOSK_USER[[:space:]]*$/ {
+      value=$0
+      sub(/^[^=]*=/, "", value)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      gsub(/^"|"$/, "", value)
+      gsub(/^'\''|'\''$/, "", value)
+      print value
+      exit
+    }
+  ' "${CONFIG_FILE}")"
+  [ -n "${configured_kiosk_user}" ] && KIOSK_USER="${configured_kiosk_user}"
 fi
 
 passwd_entry="$(getent passwd "${KIOSK_USER}" || true)"
@@ -21,6 +32,8 @@ if [ -n "${passwd_entry}" ]; then
   user_runtime="/run/user/${user_uid}"
   user_bus="${user_runtime}/bus"
   if [ -S "${user_bus}" ]; then
+    runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user disable --now digitalsignage-health.timer 2>/dev/null || true
+    runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user stop digitalsignage-health.service 2>/dev/null || true
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user disable --now digitalsignage-resource-log.timer 2>/dev/null || true
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user disable --now digitalsignage-refresh.timer 2>/dev/null || true
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user disable --now digitalsignage-kiosk.service 2>/dev/null || true
@@ -30,6 +43,10 @@ if [ -n "${passwd_entry}" ]; then
   rm -f "${user_home}/.config/systemd/user/digitalsignage-refresh.timer"
   rm -f "${user_home}/.config/systemd/user/digitalsignage-resource-log.service"
   rm -f "${user_home}/.config/systemd/user/digitalsignage-resource-log.timer"
+  rm -f "${user_home}/.config/systemd/user/digitalsignage-health.service"
+  rm -f "${user_home}/.config/systemd/user/digitalsignage-health.timer"
+  rm -f "${user_home}/.config/systemd/user/digitalsignage-health.timer.d/interval.conf"
+  rmdir "${user_home}/.config/systemd/user/digitalsignage-health.timer.d" 2>/dev/null || true
   chown -R "${KIOSK_USER}:${KIOSK_USER}" "${user_home}/.config" 2>/dev/null || true
   if [ -S "${user_bus}" ]; then
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user daemon-reload 2>/dev/null || true
@@ -47,5 +64,6 @@ rm -rf /opt/digitalsignage
 systemctl daemon-reload
 
 echo "Verwijderd. Configuratie in /etc/digitalsignage en swaplogs blijven staan."
-echo "Een ICT-medewerker kan het log handmatig verwijderen met:"
+echo "Een ICT-medewerker kan logs en state handmatig verwijderen met:"
 echo "  rm -f ~/.local/state/digitalsignage/swap.log ~/.local/state/digitalsignage/swap.log.1"
+echo "  rm -f ~/.local/state/digitalsignage/health.log ~/.local/state/digitalsignage/health.log.1 ~/.local/state/digitalsignage/health-state.json"

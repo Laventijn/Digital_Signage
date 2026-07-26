@@ -1,0 +1,12 @@
+[Unit]
+Description=Digital Signage health-check iedere minuut
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=5s
+Persistent=true
+Unit=digitalsignage-health.service
+
+[Install]
+WantedBy=timers.target

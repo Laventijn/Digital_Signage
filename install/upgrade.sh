@@ -7,6 +7,13 @@ CONFIG_FILE="/etc/digitalsignage/digitalsignage.conf"
 CONFIG_DEFAULTS=(
   "REFRESH_SECONDS=300"
   "RESOURCE_LOG_RETENTION_DAYS=3"
+  "HEALTH_CHECK_SECONDS=60"
+  "HEALTH_FAILURE_THRESHOLD=3"
+  "HEALTH_RESTART_COOLDOWN_SECONDS=600"
+  "HEALTH_HTTP_TIMEOUT_SECONDS=5"
+  "HEALTH_STARTUP_GRACE_SECONDS=90"
+  "HEALTH_LOG_RETENTION_DAYS=3"
+  "HEALTH_LOG_MAX_BYTES=5242880"
 )
 
 active_config_has_key() {
@@ -76,6 +83,7 @@ fi
 
 KIOSK_USER="bloemkool"
 REFRESH_SECONDS="300"
+HEALTH_CHECK_SECONDS="60"
 append_missing_config_defaults "${CONFIG_FILE}"
 if [ -f "${CONFIG_FILE}" ]; then
   configured_kiosk_user="$(read_config_value KIOSK_USER "${CONFIG_FILE}")"
@@ -85,6 +93,10 @@ if [ -f "${CONFIG_FILE}" ]; then
   configured_refresh_seconds="$(read_config_value REFRESH_SECONDS "${CONFIG_FILE}")"
   if [ -n "${configured_refresh_seconds}" ]; then
     REFRESH_SECONDS="${configured_refresh_seconds}"
+  fi
+  configured_health_seconds="$(read_config_value HEALTH_CHECK_SECONDS "${CONFIG_FILE}")"
+  if [ -n "${configured_health_seconds}" ]; then
+    HEALTH_CHECK_SECONDS="${configured_health_seconds}"
   fi
 fi
 
@@ -111,6 +123,13 @@ refresh_interval() {
   esac
 }
 
+health_interval() {
+  case "${HEALTH_CHECK_SECONDS:-}" in
+    ''|*[!0-9]*|0) printf '60' ;;
+    *) printf '%s' "${HEALTH_CHECK_SECONDS}" ;;
+  esac
+}
+
 write_refresh_timer() {
   local timer_file="$1"
   local interval
@@ -130,10 +149,20 @@ WantedBy=timers.target
 EOF
 }
 
+write_health_timer_dropin() {
+  local dropin_dir="$1"
+  local interval
+  interval="$(health_interval)"
+  install -d -m 0755 "${dropin_dir}"
+  cat > "${dropin_dir}/interval.conf" <<EOF
+[Timer]
+OnUnitActiveSec=
+OnUnitActiveSec=${interval}s
+EOF
+}
+
 mkdir -p "${INSTALL_DIR}"
 install_project_files
-cp "${PROJECT_ROOT}/services/digitalsignage-healthcheck.service" /etc/systemd/system/
-cp "${PROJECT_ROOT}/services/digitalsignage-healthcheck.timer" /etc/systemd/system/
 
 passwd_entry="$(getent passwd "${KIOSK_USER}" || true)"
 if [ -z "${passwd_entry}" ]; then
@@ -155,12 +184,15 @@ else
   cp "${PROJECT_ROOT}/services/digitalsignage-refresh.service" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-resource-log.service" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-resource-log.timer" "${user_unit_dir}/"
+  cp "${PROJECT_ROOT}/services/digitalsignage-health.service" "${user_unit_dir}/"
+  cp "${PROJECT_ROOT}/services/digitalsignage-health.timer" "${user_unit_dir}/"
   write_refresh_timer "${user_unit_dir}/digitalsignage-refresh.timer"
-  chown -R "${KIOSK_USER}:${KIOSK_USER}" "${user_home}/.config"
+  write_health_timer_dropin "${user_unit_dir}/digitalsignage-health.timer.d"
+  chown -R "${KIOSK_USER}:${user_group}" "${user_home}/.config"
 
   # Maak de gebruikersstatusmap voordat user-services opnieuw geladen of gestart
-  # worden. De resource-logservice schrijft hier swap.log; deze stap herstelt
-  # oudere installaties en voorkomt status=226/NAMESPACE.
+  # worden. Resource-logging en health-check schrijven hier hun state en logs;
+  # deze stap herstelt oudere installaties en voorkomt status=226/NAMESPACE.
   user_state_dir="${user_home}/.local/state/digitalsignage"
   install -d -m 0755 -o "${KIOSK_USER}" -g "${user_group}" "${user_state_dir}"
 
@@ -172,6 +204,8 @@ else
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-refresh.timer
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user restart digitalsignage-refresh.timer
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-resource-log.timer
+    runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-health.timer
+    runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user restart digitalsignage-health.timer
   else
     echo "Geen actieve usersessie gevonden voor '${KIOSK_USER}'; user-services zijn bijgewerkt maar niet gestart."
     echo "Start na aanmelden als '${KIOSK_USER}':"
@@ -179,6 +213,7 @@ else
     echo "  systemctl --user enable --now digitalsignage-kiosk.service"
     echo "  systemctl --user enable --now digitalsignage-refresh.timer"
     echo "  systemctl --user enable --now digitalsignage-resource-log.timer"
+    echo "  systemctl --user enable --now digitalsignage-health.timer"
   fi
 fi
 

@@ -36,8 +36,17 @@ chmod 0640 "${missing_config}"
 run_merge "${missing_config}"
 assert_contains '^REFRESH_SECONDS=300$' "${missing_config}"
 assert_contains '^RESOURCE_LOG_RETENTION_DAYS=3$' "${missing_config}"
+assert_contains '^HEALTH_CHECK_SECONDS=60$' "${missing_config}"
+assert_contains '^HEALTH_FAILURE_THRESHOLD=3$' "${missing_config}"
+assert_contains '^HEALTH_RESTART_COOLDOWN_SECONDS=600$' "${missing_config}"
+assert_contains '^HEALTH_HTTP_TIMEOUT_SECONDS=5$' "${missing_config}"
+assert_contains '^HEALTH_STARTUP_GRACE_SECONDS=90$' "${missing_config}"
+assert_contains '^HEALTH_LOG_RETENTION_DAYS=3$' "${missing_config}"
+assert_contains '^HEALTH_LOG_MAX_BYTES=5242880$' "${missing_config}"
 [ "$(count_active_key REFRESH_SECONDS "${missing_config}")" -eq 1 ]
 [ "$(count_active_key RESOURCE_LOG_RETENTION_DAYS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key HEALTH_CHECK_SECONDS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key HEALTH_FAILURE_THRESHOLD "${missing_config}")" -eq 1 ]
 [ "$(stat -c '%a' "${missing_config}")" = "640" ]
 ls "${missing_config}".backup.* >/dev/null
 
@@ -45,29 +54,55 @@ existing_config="${TEMP_DIR}/existing.conf"
 cat > "${existing_config}" <<'EOF'
 REFRESH_SECONDS=120
 RESOURCE_LOG_RETENTION_DAYS=9
+HEALTH_CHECK_SECONDS=30
+HEALTH_FAILURE_THRESHOLD=5
+HEALTH_RESTART_COOLDOWN_SECONDS=900
+HEALTH_HTTP_TIMEOUT_SECONDS=7
+HEALTH_STARTUP_GRACE_SECONDS=120
+HEALTH_LOG_RETENTION_DAYS=4
+HEALTH_LOG_MAX_BYTES=1048576
 EOF
 run_merge "${existing_config}"
 assert_contains '^REFRESH_SECONDS=120$' "${existing_config}"
 assert_contains '^RESOURCE_LOG_RETENTION_DAYS=9$' "${existing_config}"
+assert_contains '^HEALTH_CHECK_SECONDS=30$' "${existing_config}"
+assert_contains '^HEALTH_FAILURE_THRESHOLD=5$' "${existing_config}"
+assert_contains '^HEALTH_RESTART_COOLDOWN_SECONDS=900$' "${existing_config}"
+assert_contains '^HEALTH_HTTP_TIMEOUT_SECONDS=7$' "${existing_config}"
+assert_contains '^HEALTH_STARTUP_GRACE_SECONDS=120$' "${existing_config}"
+assert_contains '^HEALTH_LOG_RETENTION_DAYS=4$' "${existing_config}"
+assert_contains '^HEALTH_LOG_MAX_BYTES=1048576$' "${existing_config}"
 [ "$(count_active_key REFRESH_SECONDS "${existing_config}")" -eq 1 ]
 [ "$(count_active_key RESOURCE_LOG_RETENTION_DAYS "${existing_config}")" -eq 1 ]
+[ "$(count_active_key HEALTH_CHECK_SECONDS "${existing_config}")" -eq 1 ]
+[ "$(count_active_key HEALTH_FAILURE_THRESHOLD "${existing_config}")" -eq 1 ]
 
 run_merge "${missing_config}"
 [ "$(count_active_key REFRESH_SECONDS "${missing_config}")" -eq 1 ]
 [ "$(count_active_key RESOURCE_LOG_RETENTION_DAYS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key HEALTH_CHECK_SECONDS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key HEALTH_FAILURE_THRESHOLD "${missing_config}")" -eq 1 ]
 
 commented_config="${TEMP_DIR}/commented.conf"
 cat > "${commented_config}" <<'EOF'
 #REFRESH_SECONDS=60
 #RESOURCE_LOG_RETENTION_DAYS=12
+#HEALTH_CHECK_SECONDS=15
+#HEALTH_FAILURE_THRESHOLD=9
 SWAP_LOG_MAX_BYTES=5242880
 EOF
 run_merge "${commented_config}"
 assert_contains '^#REFRESH_SECONDS=60$' "${commented_config}"
 assert_contains '^#RESOURCE_LOG_RETENTION_DAYS=12$' "${commented_config}"
+assert_contains '^#HEALTH_CHECK_SECONDS=15$' "${commented_config}"
+assert_contains '^#HEALTH_FAILURE_THRESHOLD=9$' "${commented_config}"
 assert_contains '^REFRESH_SECONDS=300$' "${commented_config}"
 assert_contains '^RESOURCE_LOG_RETENTION_DAYS=3$' "${commented_config}"
+assert_contains '^HEALTH_CHECK_SECONDS=60$' "${commented_config}"
+assert_contains '^HEALTH_FAILURE_THRESHOLD=3$' "${commented_config}"
 [ "$(count_active_key REFRESH_SECONDS "${commented_config}")" -eq 1 ]
 [ "$(count_active_key RESOURCE_LOG_RETENTION_DAYS "${commented_config}")" -eq 1 ]
+[ "$(count_active_key HEALTH_CHECK_SECONDS "${commented_config}")" -eq 1 ]
+[ "$(count_active_key HEALTH_FAILURE_THRESHOLD "${commented_config}")" -eq 1 ]
 
 echo "Upgradeconfiguratie-merge OK."

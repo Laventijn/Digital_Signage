@@ -10,14 +10,18 @@ required_files=(
   "scripts/start-kiosk.sh"
   "scripts/refresh-presentation.py"
   "scripts/log-resources.py"
+  "scripts/health-check.py"
   "services/digitalsignage-kiosk.service"
   "services/digitalsignage-refresh.service"
   "services/digitalsignage-refresh.timer"
   "services/digitalsignage-resource-log.service"
   "services/digitalsignage-resource-log.timer"
+  "services/digitalsignage-health.service"
+  "services/digitalsignage-health.timer"
   "tests/test-upgrade-config-merge.sh"
   "tests/test-resource-log-retention.py"
   "tests/test-refresh-presentation.py"
+  "tests/test_health_check.py"
   "web/offline/index.html"
 )
 
@@ -53,6 +57,22 @@ fi
 
 if ! grep -q '^StateDirectory=digitalsignage$' "${ROOT_DIR}/services/digitalsignage-resource-log.service"; then
   echo "Resource-logservice definieert geen StateDirectory=digitalsignage." >&2
+  exit 1
+fi
+
+if grep -q '^ReadWritePaths=' "${ROOT_DIR}/services/digitalsignage-health.service"; then
+  echo "Healthservice bevat een fragiele ReadWritePaths-instelling." >&2
+  exit 1
+fi
+
+if ! grep -q '^StateDirectory=digitalsignage$' "${ROOT_DIR}/services/digitalsignage-health.service"; then
+  echo "Healthservice definieert geen StateDirectory=digitalsignage." >&2
+  exit 1
+fi
+
+if ! grep -q 'digitalsignage-health.timer.d' "${ROOT_DIR}/install/install.sh" ||
+  ! grep -q 'digitalsignage-health.timer.d' "${ROOT_DIR}/install/upgrade.sh"; then
+  echo "Installer of upgrader schrijft geen healthtimer-drop-in." >&2
   exit 1
 fi
 

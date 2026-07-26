@@ -15,6 +15,7 @@ De installatie moet:
 - regelmatig terug navigeren naar de basis-URL van de Google Slides-presentatie;
 - verborgen of gewijzigde dia's correct verwerken;
 - RAM- en swapgebruik compact loggen;
+- automatisch controleren of kiosk, Chromium en debugpoort gezond zijn;
 - zonder F5, Ctrl+R, Ctrl+L of gesimuleerde toetsen blijven werken;
 - veilig opnieuw geinstalleerd of bijgewerkt kunnen worden.
 
@@ -94,6 +95,8 @@ digitalsignage-refresh.service
 digitalsignage-refresh.timer
 digitalsignage-resource-log.service
 digitalsignage-resource-log.timer
+digitalsignage-health.service
+digitalsignage-health.timer
 ```
 
 Er hoort geen `User=`-regel in deze user-units te staan.
@@ -110,6 +113,21 @@ swapgebruik naar:
 ```
 
 Logregels ouder dan 3 dagen worden automatisch verwijderd.
+
+`digitalsignage-health.timer` draait standaard iedere minuut. De health-check
+controleert de kioskservice, het door systemd gemelde Chromium-hoofdproces,
+de lokale DevTools-poort `127.0.0.1:9222` en het Chromium-paginatarget. Een
+tijdelijke fout telt mee, maar veroorzaakt nog geen herstelactie. Standaard
+wordt de kioskservice pas na drie opeenvolgende fouten herstart. Na een
+automatische restart geldt tien minuten cooldown en 90 seconden startup-grace.
+De volledige Raspberry Pi wordt nooit automatisch herstart.
+
+Health-state en health-log staan in:
+
+```text
+~/.local/state/digitalsignage/health-state.json
+~/.local/state/digitalsignage/health.log
+```
 
 De installer en upgrader maken deze map vooraf aan op basis van `KIOSK_USER` en `getent passwd`. Hardcoded homefolders zoals `/home/pi` of `/home/bloemkool` zijn niet toegestaan.
 
@@ -170,5 +188,7 @@ Een installatie is pas klaar voor gebruik wanneer:
 - de presentatie correct geladen wordt;
 - refresh via DevTools werkt;
 - `swap.log` iedere 10 minuten wordt bijgewerkt;
+- `digitalsignage-health.timer` actief is;
+- een gezonde kiosk `health=ok action=none` logt;
 - geen geheimen in Git staan;
 - geen hardcoded homefolder gebruikt wordt.

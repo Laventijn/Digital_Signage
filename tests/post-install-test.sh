@@ -136,7 +136,7 @@ test_user_and_config() {
 test_install_paths() {
   local failed=0
   local path
-  for path in /opt/digitalsignage /etc/digitalsignage/digitalsignage.conf /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py; do
+  for path in /opt/digitalsignage /etc/digitalsignage/digitalsignage.conf /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py /opt/digitalsignage/scripts/health-check.py; do
     if [ -e "${path}" ]; then
       log_ok "Installatiepad bestaat: ${path}"
     else
@@ -145,7 +145,7 @@ test_install_paths() {
     fi
   done
 
-  for path in /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py /opt/digitalsignage/scripts/health-check.sh /opt/digitalsignage/scripts/refresh-kiosk.sh /opt/digitalsignage/scripts/restart-chromium.sh /opt/digitalsignage/scripts/show-network-info.sh /opt/digitalsignage/scripts/check-network.sh; do
+  for path in /opt/digitalsignage/scripts/start-kiosk.sh /opt/digitalsignage/scripts/refresh-presentation.py /opt/digitalsignage/scripts/log-resources.py /opt/digitalsignage/scripts/health-check.py /opt/digitalsignage/scripts/health-check.sh /opt/digitalsignage/scripts/refresh-kiosk.sh /opt/digitalsignage/scripts/restart-chromium.sh /opt/digitalsignage/scripts/show-network-info.sh /opt/digitalsignage/scripts/check-network.sh; do
     if [ -x "${path}" ]; then
       log_ok "Script is uitvoerbaar: ${path}"
     else
@@ -197,11 +197,11 @@ test_user_systemd() {
     return 1
   fi
 
-  for unit in digitalsignage-kiosk.service digitalsignage-refresh.timer digitalsignage-resource-log.timer; do
+  for unit in digitalsignage-kiosk.service digitalsignage-refresh.timer digitalsignage-resource-log.timer digitalsignage-health.timer; do
     run_user_systemctl status "${unit}" --no-pager || log_warning "Statuscontrole gaf niet-nul exitcode voor ${unit}"
   done
 
-  for unit in digitalsignage-refresh.service digitalsignage-resource-log.service; do
+  for unit in digitalsignage-refresh.service digitalsignage-resource-log.service digitalsignage-health.service; do
     local unit_state
     unit_state="$(show_oneshot_result "${unit}")"
     printf '%s\n' "${unit_state}"
@@ -212,9 +212,11 @@ test_user_systemd() {
   run_user_systemctl is-enabled digitalsignage-kiosk.service >/dev/null && log_ok "Kioskservice is enabled" || { log_error "Kioskservice is niet enabled"; failed=1; }
   run_user_systemctl is-enabled digitalsignage-refresh.timer >/dev/null && log_ok "Refreshtimer is enabled" || { log_error "Refreshtimer is niet enabled"; failed=1; }
   run_user_systemctl is-enabled digitalsignage-resource-log.timer >/dev/null && log_ok "Resource-logtimer is enabled" || { log_error "Resource-logtimer is niet enabled"; failed=1; }
+  run_user_systemctl is-enabled digitalsignage-health.timer >/dev/null && log_ok "Healthtimer is enabled" || { log_error "Healthtimer is niet enabled"; failed=1; }
   run_user_systemctl is-active digitalsignage-kiosk.service >/dev/null && log_ok "Kioskservice is actief" || { log_error "Kioskservice is niet actief"; failed=1; }
   run_user_systemctl is-active digitalsignage-refresh.timer >/dev/null && log_ok "Refreshtimer is actief" || { log_error "Refreshtimer is niet actief"; failed=1; }
   run_user_systemctl is-active digitalsignage-resource-log.timer >/dev/null && log_ok "Resource-logtimer is actief" || { log_error "Resource-logtimer is niet actief"; failed=1; }
+  run_user_systemctl is-active digitalsignage-health.timer >/dev/null && log_ok "Healthtimer is actief" || { log_error "Healthtimer is niet actief"; failed=1; }
 
   return "${failed}"
 }
@@ -339,6 +341,62 @@ test_resource_log() {
   return "${failed}"
 }
 
+test_health_check() {
+  local failed=0
+  local state_dir="${KIOSK_HOME}/.local/state/digitalsignage"
+  local health_log="${state_dir}/health.log"
+  local health_state="${state_dir}/health-state.json"
+  local kiosk_pid_before kiosk_pid_after journal status last_line simulation_dir
+
+  kiosk_pid_before="$(get_user_unit_property digitalsignage-kiosk.service MainPID)"
+  run_user_systemctl start digitalsignage-health.service || {
+    log_error "Handmatige healthservice start faalt"
+    return 1
+  }
+
+  journal="$(show_oneshot_result digitalsignage-health.service)"
+  printf '%s\n' "${journal}"
+  status="$(run_user_systemctl status digitalsignage-health.service --no-pager 2>&1 || true)"
+  printf '%s\n' "${status}"
+
+  printf '%s\n%s\n' "${status}" "${journal}" | grep -E '226/NAMESPACE|Failed to set up mount namespacing' >/dev/null && { log_error "Namespacefout gevonden bij healthservice"; failed=1; }
+  printf '%s\n' "${journal}" | grep -E 'ExecMainStatus=(0|1)' >/dev/null && log_ok "Healthservice exitstatus 0 of verwachte 1" || { log_error "Healthservice exitstatus is niet 0 of 1"; failed=1; }
+
+  if [ -f "${health_log}" ]; then
+    log_ok "Health-log bestaat: ${health_log}"
+    last_line="$(tail -n 1 "${health_log}")"
+    printf '%s\n' "${last_line}"
+    printf '%s\n' "${last_line}" | grep -E 'health=(ok|warning|failed)' >/dev/null && log_ok "Health-log bevat healthveld" || { log_error "Health-log mist healthveld"; failed=1; }
+    printf '%s\n' "${last_line}" | grep -F 'action=' >/dev/null && log_ok "Health-log bevat actionveld" || { log_error "Health-log mist actionveld"; failed=1; }
+    printf '%s\n' "${last_line}" | grep -F 'failures=' >/dev/null && log_ok "Health-log bevat failureteller" || { log_error "Health-log mist failureteller"; failed=1; }
+  else
+    log_error "Health-log ontbreekt: ${health_log}"
+    failed=1
+  fi
+
+  if [ -f "${health_state}" ]; then
+    python3 -m json.tool "${health_state}" >/dev/null && log_ok "health-state.json is geldige JSON" || { log_error "health-state.json is ongeldig"; failed=1; }
+  else
+    log_error "health-state.json ontbreekt: ${health_state}"
+    failed=1
+  fi
+
+  simulation_dir="$(mktemp -d)"
+  chown "${KIOSK_USER}:${KIOSK_GROUP}" "${simulation_dir}"
+  if run_as_kiosk_user /opt/digitalsignage/scripts/health-check.py --simulate-debug-failure --state-dir "${simulation_dir}"; then
+    log_warning "Gesimuleerde fout gaf exitcode 0; controleer output hierboven"
+  else
+    log_ok "Gesimuleerde fout gaf verwachte niet-nul exitcode"
+  fi
+  tail -n 1 "${simulation_dir}/health.log" | grep -F 'action=none' >/dev/null && log_ok "Een gesimuleerde fout veroorzaakt geen restart" || { log_error "Gesimuleerde fout probeerde herstelactie"; failed=1; }
+  rm -rf "${simulation_dir}"
+
+  kiosk_pid_after="$(get_user_unit_property digitalsignage-kiosk.service MainPID)"
+  [ "${kiosk_pid_before}" = "${kiosk_pid_after}" ] && log_ok "Kiosk MainPID bleef gelijk na gezonde health-check en simulatie" || log_warning "Kiosk MainPID veranderde van ${kiosk_pid_before} naar ${kiosk_pid_after}"
+
+  return "${failed}"
+}
+
 test_timer() {
   run_user_systemctl list-timers --all --no-pager | grep digitalsignage || true
   if run_user_systemctl list-timers --all --no-pager | grep -F 'digitalsignage-refresh.timer' >/dev/null; then
@@ -349,9 +407,15 @@ test_timer() {
   fi
   if run_user_systemctl list-timers --all --no-pager | grep -F 'digitalsignage-resource-log.timer' >/dev/null; then
     log_ok "Resource-logtimer heeft timerinformatie"
+  else
+    log_error "Resource-logtimer ontbreekt in list-timers"
+    return 1
+  fi
+  if run_user_systemctl list-timers --all --no-pager | grep -F 'digitalsignage-health.timer' >/dev/null; then
+    log_ok "Healthtimer heeft timerinformatie"
     return 0
   fi
-  log_error "Resource-logtimer ontbreekt in list-timers"
+  log_error "Healthtimer ontbreekt in list-timers"
   return 1
 }
 
@@ -380,7 +444,7 @@ test_system_status() {
 
 test_journals() {
   local unit output unit_state
-  for unit in digitalsignage-kiosk.service digitalsignage-refresh.service digitalsignage-refresh.timer digitalsignage-resource-log.service digitalsignage-resource-log.timer; do
+  for unit in digitalsignage-kiosk.service digitalsignage-refresh.service digitalsignage-refresh.timer digitalsignage-resource-log.service digitalsignage-resource-log.timer digitalsignage-health.service digitalsignage-health.timer; do
     log_info "Laatste journalregels voor ${unit}"
     unit_state="$(run_user_systemctl show "${unit}" --property=Result --property=ExecMainStatus --property=ActiveState --no-pager 2>&1 || true)"
     output="$(read_unit_journal "${unit}" 2>&1)"
@@ -401,6 +465,7 @@ run_test "Chromium" test_chromium
 run_test "Debugpoort" test_debug_port
 run_test "Handmatige refresh" test_manual_refresh
 run_test "Resource-log" test_resource_log
+run_test "Health-check" test_health_check
 run_test "Timer" test_timer
 run_test "Systeemstatus" test_system_status
 run_test "Journals" test_journals

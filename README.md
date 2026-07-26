@@ -63,6 +63,38 @@ RAM en swap iedere 10 minuten worden opgeslagen via
 `digitalsignage-resource-log.timer`. Logregels ouder dan 3 dagen worden
 automatisch opgeruimd.
 
+## Automatische Health-Check
+
+`digitalsignage-health.timer` controleert standaard iedere minuut of de
+kioskservice actief is, het Chromium-hoofdproces bestaat, poort
+`127.0.0.1:9222` antwoordt en er een geldig Chromium-paginatarget bestaat.
+Een enkele tijdelijke fout veroorzaakt geen restart. Standaard zijn drie
+opeenvolgende fouten nodig; daarna wordt alleen
+`digitalsignage-kiosk.service` herstart. Na een restart geldt tien minuten
+cooldown en een startup-graceperiode van 90 seconden.
+
+Status en logs:
+
+```bash
+systemctl --user status digitalsignage-health.timer --no-pager
+systemctl --user list-timers --all | grep digitalsignage
+tail -20 ~/.local/state/digitalsignage/health.log
+cat ~/.local/state/digitalsignage/health-state.json
+journalctl --user -u digitalsignage-health.service -n 50 --no-pager
+```
+
+Tijdelijk uitschakelen:
+
+```bash
+systemctl --user disable --now digitalsignage-health.timer
+```
+
+Opnieuw inschakelen:
+
+```bash
+systemctl --user enable --now digitalsignage-health.timer
+```
+
 ## Documentatie
 
 Begin met [docs/01-projectoverzicht.md](docs/01-projectoverzicht.md).

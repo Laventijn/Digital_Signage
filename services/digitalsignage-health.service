@@ -1,0 +1,15 @@
+[Unit]
+Description=Digital Signage health-check
+After=default.target digitalsignage-kiosk.service
+Wants=digitalsignage-kiosk.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/digitalsignage/scripts/health-check.py
+SuccessExitStatus=0 1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+StateDirectory=digitalsignage
+StateDirectoryMode=0755
+ReadOnlyPaths=/etc/digitalsignage

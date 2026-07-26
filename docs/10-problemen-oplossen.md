@@ -37,6 +37,35 @@ scripts/restart-chromium.sh
 
 `scripts/refresh-kiosk.sh` is alleen nog een compatibiliteitswrapper naar `refresh-presentation.py`. De wrapper stuurt geen F5, Ctrl+R, SIGHUP of toetsen meer.
 
+## Automatische Health-Check
+
+De health-check draait als systemd user-timer. Een enkele tijdelijke fout
+veroorzaakt geen restart; standaard zijn drie opeenvolgende fouten nodig. Na
+een automatische kioskrestart geldt tien minuten cooldown en 90 seconden
+startup-grace.
+
+Status en logs:
+
+```bash
+systemctl --user status digitalsignage-health.timer --no-pager
+systemctl --user list-timers --all | grep digitalsignage
+tail -20 ~/.local/state/digitalsignage/health.log
+cat ~/.local/state/digitalsignage/health-state.json
+journalctl --user -u digitalsignage-health.service -n 50 --no-pager
+```
+
+Tijdelijk uitschakelen:
+
+```bash
+systemctl --user disable --now digitalsignage-health.timer
+```
+
+Opnieuw inschakelen:
+
+```bash
+systemctl --user enable --now digitalsignage-health.timer
+```
+
 ## Presentatie Refresh
 
 De refresh gebeurt via Chrome DevTools Protocol op `127.0.0.1:9222`. Dit is betrouwbaarder dan F5, Ctrl+R of gesimuleerde toetsen, omdat Google Slides tijdens het afspelen `&slide=id...` aan de URL kan toevoegen. `Page.navigate` stuurt het bestaande Google Slides-tabblad terug naar de oorspronkelijke `PRESENTATION_URL`. Google Slides speelt zelf af en loopt via `loop=true`; de refresh haalt standaard ongeveer iedere vijf minuten wijzigingen op.
@@ -102,17 +131,18 @@ sudo chown -R "$USER":"$(id -gn)" test-logs
 Python-cachebestanden zoals `__pycache__/` en `*.pyc` horen niet in Git en
 worden door `.gitignore` uitgesloten.
 
-## Windows Fase-2-Test
+## Windows Fase-2A-Test
 
 Vanaf Windows kan de Raspberry Pi-test gestart worden met:
 
 ```powershell
-cmd /c "tools\windows\test-fase1-pi.bat"
+cmd /c "tools\windows\test-fase2a-pi.bat"
 ```
 
-Pas zo nodig bovenaan in de batchfile `PI_USER`, `PI_HOST` en `PI_PROJECT_PATH`
-aan. De batch gebruikt Windows `ssh` en `scp`, slaat alle uitvoer op onder
-`tools\windows\logs\` en bewaart geen wachtwoorden.
+Pas zo nodig bovenaan in `tools\windows\test-fase2a-pi.bat` `PI_USER`,
+`PI_HOST` en `PI_PROJECT_PATH` aan. De oude `test-fase1-pi.bat` blijft bestaan
+als compatibiliteitswrapper. De batch gebruikt Windows `ssh` en `scp`, slaat
+alle uitvoer op onder `tools\windows\logs\` en bewaart geen wachtwoorden.
 
 ## Fontconfig-Waarschuwing
 

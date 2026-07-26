@@ -133,7 +133,7 @@ De installer hoort onder andere:
 - de homefolder via `getent passwd` te bepalen;
 - de statusmap aan te maken;
 - systemd-user-units te installeren;
-- kioskservice, refreshtimer en resource-logtimer te activeren wanneer een usersessie actief is.
+- kioskservice, refreshtimer, resource-logtimer en healthtimer te activeren wanneer een usersessie actief is.
 
 De installer mag geen hardcoded homefolder gebruiken.
 
@@ -161,6 +161,10 @@ REMOTE_DEBUG_HOST="127.0.0.1"
 REMOTE_DEBUG_PORT=9222
 CACHE_SIZE_MB=100
 REFRESH_SECONDS=300
+HEALTH_CHECK_SECONDS=60
+HEALTH_FAILURE_THRESHOLD=3
+HEALTH_RESTART_COOLDOWN_SECONDS=600
+HEALTH_STARTUP_GRACE_SECONDS=90
 KIOSK_USER="bloemkool"
 ```
 
@@ -187,10 +191,12 @@ De test controleert onder andere:
 - kioskservice;
 - refreshtimer;
 - resource-logtimer;
+- healthtimer;
 - Chromium-opdrachtregel;
 - debugpoort `9222`;
 - handmatige refresh;
 - resource-log;
+- health-log en health-state;
 - namespacefouten;
 - RAM, swap en schijfruimte.
 
@@ -238,6 +244,28 @@ systemctl --user status digitalsignage-resource-log.timer --no-pager
 tail -10 ~/.local/state/digitalsignage/swap.log
 ```
 
+Health-check:
+
+```bash
+systemctl --user status digitalsignage-health.timer --no-pager
+systemctl --user list-timers --all | grep digitalsignage
+tail -20 ~/.local/state/digitalsignage/health.log
+cat ~/.local/state/digitalsignage/health-state.json
+journalctl --user -u digitalsignage-health.service -n 50 --no-pager
+```
+
+Tijdelijk uitschakelen:
+
+```bash
+systemctl --user disable --now digitalsignage-health.timer
+```
+
+Opnieuw inschakelen:
+
+```bash
+systemctl --user enable --now digitalsignage-health.timer
+```
+
 ## 10. Definitieve Reboottest
 
 Herstart:
@@ -253,7 +281,9 @@ Controleer na de reboot:
 - kioskmodus is actief;
 - kioskservice is actief;
 - refreshtimer is actief;
+- healthtimer is actief;
 - `swap.log` krijgt iedere 10 minuten nieuwe resource-logregels;
+- `health.log` bevat `health=ok action=none` bij een gezonde kiosk;
 - er zijn geen gefaalde Digital Signage-services.
 
 Aanvullende commando's:
@@ -263,9 +293,12 @@ systemctl --failed
 systemctl --user status digitalsignage-kiosk.service --no-pager
 systemctl --user status digitalsignage-refresh.timer --no-pager
 systemctl --user status digitalsignage-resource-log.timer --no-pager
+systemctl --user status digitalsignage-health.timer --no-pager
 journalctl --user -u digitalsignage-refresh.service -n 20 --no-pager
 journalctl --user -u digitalsignage-resource-log.service -n 20 --no-pager
+journalctl --user -u digitalsignage-health.service -n 20 --no-pager
 tail -5 ~/.local/state/digitalsignage/swap.log
+tail -5 ~/.local/state/digitalsignage/health.log
 free -h
 df -h /
 ```
@@ -286,6 +319,8 @@ journalctl --user -u digitalsignage-refresh.service -n 50 --no-pager
 journalctl --user -u digitalsignage-refresh.timer -n 50 --no-pager
 journalctl --user -u digitalsignage-resource-log.service -n 50 --no-pager
 journalctl --user -u digitalsignage-resource-log.timer -n 50 --no-pager
+journalctl --user -u digitalsignage-health.service -n 50 --no-pager
+journalctl --user -u digitalsignage-health.timer -n 50 --no-pager
 systemctl --failed
 ```
 

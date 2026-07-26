@@ -116,15 +116,19 @@ test_repository() {
     "scripts/start-kiosk.sh"
     "scripts/refresh-presentation.py"
     "scripts/log-resources.py"
+    "scripts/health-check.py"
     "services/digitalsignage-kiosk.service"
     "services/digitalsignage-refresh.service"
     "services/digitalsignage-refresh.timer"
     "services/digitalsignage-resource-log.service"
     "services/digitalsignage-resource-log.timer"
+    "services/digitalsignage-health.service"
+    "services/digitalsignage-health.timer"
     "config/digitalsignage.conf.example"
     "tests/test-upgrade-config-merge.sh"
     "tests/test-resource-log-retention.py"
     "tests/test-refresh-presentation.py"
+    "tests/test_health_check.py"
   )
 
   for file in "${required_files[@]}"; do
@@ -136,7 +140,7 @@ test_repository() {
     fi
   done
 
-  for file in install/install.sh install/upgrade.sh install/uninstall.sh scripts/start-kiosk.sh scripts/refresh-kiosk.sh scripts/restart-chromium.sh scripts/health-check.sh scripts/refresh-presentation.py scripts/log-resources.py; do
+  for file in install/install.sh install/upgrade.sh install/uninstall.sh scripts/start-kiosk.sh scripts/refresh-kiosk.sh scripts/restart-chromium.sh scripts/health-check.sh scripts/health-check.py scripts/refresh-presentation.py scripts/log-resources.py; do
     if [ -x "${TEST_ROOT_DIR}/${file}" ]; then
       log_ok "Uitvoerbaar: ${file}"
     else
@@ -179,7 +183,7 @@ test_bash_syntax() {
 test_python_syntax() {
   local pycache_dir
   pycache_dir="$(mktemp -d)"
-  if PYTHONPYCACHEPREFIX="${pycache_dir}" python3 -m py_compile "${TEST_ROOT_DIR}/scripts/refresh-presentation.py" "${TEST_ROOT_DIR}/scripts/log-resources.py" "${TEST_ROOT_DIR}/tests/test-resource-log-retention.py" "${TEST_ROOT_DIR}/tests/test-refresh-presentation.py"; then
+  if PYTHONPYCACHEPREFIX="${pycache_dir}" python3 -m py_compile "${TEST_ROOT_DIR}/scripts/health-check.py" "${TEST_ROOT_DIR}/scripts/refresh-presentation.py" "${TEST_ROOT_DIR}/scripts/log-resources.py" "${TEST_ROOT_DIR}/tests/test_health_check.py" "${TEST_ROOT_DIR}/tests/test-resource-log-retention.py" "${TEST_ROOT_DIR}/tests/test-refresh-presentation.py"; then
     log_ok "Python-syntaxis is geldig"
   else
     rm -rf "${pycache_dir}"
@@ -194,7 +198,7 @@ test_python_syntax() {
 test_systemd_units() {
   local failed=0
   local output status unit
-  for unit in services/digitalsignage-kiosk.service services/digitalsignage-refresh.service services/digitalsignage-refresh.timer services/digitalsignage-resource-log.service services/digitalsignage-resource-log.timer; do
+  for unit in services/digitalsignage-kiosk.service services/digitalsignage-refresh.service services/digitalsignage-refresh.timer services/digitalsignage-resource-log.service services/digitalsignage-resource-log.timer services/digitalsignage-health.service services/digitalsignage-health.timer; do
     output="$(systemd-analyze --user verify "${TEST_ROOT_DIR}/${unit}" 2>&1)"
     status=$?
     if [ -n "${output}" ]; then
@@ -296,11 +300,20 @@ test_refresh_presentation_unit() {
   fi
 }
 
+test_health_check_unit() {
+  if python3 -m unittest "${TEST_ROOT_DIR}/tests/test_health_check.py"; then
+    log_ok "Health-check unit tests slagen"
+  else
+    log_error "Health-check unit tests falen"
+    return 1
+  fi
+}
+
 test_forbidden_patterns() {
   local failed=0
   local pattern
   local home_prefix="/home"
-  for pattern in "${home_prefix}/pi" "${home_prefix}/bloemkool" 'chromium-browser' 'DISPLAY=:0' 'export DISPLAY' 'DISPLAY_ID' 'xdotool' 'pkill -HUP'; do
+  for pattern in "${home_prefix}/pi" "${home_prefix}/bloemkool" 'chromium-browser' 'DISPLAY=:0' 'export DISPLAY' 'DISPLAY_ID' 'xdotool' 'pkill -HUP' 'shell=True' 'pkill' 'killall' 'sudo systemctl'; do
     if grep -R -n -F --exclude-dir=__pycache__ --exclude='*.pyc' --exclude='*.pyo' "${pattern}" "${TEST_ROOT_DIR}/install" "${TEST_ROOT_DIR}/scripts" "${TEST_ROOT_DIR}/services" "${TEST_ROOT_DIR}/config"; then
       log_error "Verboden patroon gevonden: ${pattern}"
       failed=1
@@ -315,7 +328,7 @@ test_config() {
   local failed=0
   local config="${TEST_ROOT_DIR}/config/digitalsignage.conf.example"
   local key value
-  for key in PRESENTATION_URL OFFLINE_URL CHROMIUM_BIN WAYLAND_DISPLAY REMOTE_DEBUG_HOST REMOTE_DEBUG_PORT CACHE_SIZE_MB KIOSK_USER REFRESH_SECONDS SWAP_LOG_MAX_BYTES RESOURCE_LOG_RETENTION_DAYS; do
+  for key in PRESENTATION_URL OFFLINE_URL CHROMIUM_BIN WAYLAND_DISPLAY REMOTE_DEBUG_HOST REMOTE_DEBUG_PORT CACHE_SIZE_MB KIOSK_USER REFRESH_SECONDS SWAP_LOG_MAX_BYTES RESOURCE_LOG_RETENTION_DAYS HEALTH_CHECK_SECONDS HEALTH_FAILURE_THRESHOLD HEALTH_RESTART_COOLDOWN_SECONDS HEALTH_HTTP_TIMEOUT_SECONDS HEALTH_STARTUP_GRACE_SECONDS HEALTH_LOG_RETENTION_DAYS HEALTH_LOG_MAX_BYTES; do
     if [ -n "$(read_config_value "${key}" "${config}")" ]; then
       log_ok "Configvariabele aanwezig: ${key}"
     else
@@ -332,6 +345,8 @@ test_config() {
   [ "${value}" = "9222" ] && log_ok "REMOTE_DEBUG_PORT correct" || { log_error "REMOTE_DEBUG_PORT is '${value}'"; failed=1; }
   value="$(read_config_value REFRESH_SECONDS "${config}")"
   [ "${value}" = "300" ] && log_ok "REFRESH_SECONDS standaard 300" || { log_error "REFRESH_SECONDS is '${value}', verwacht 300"; failed=1; }
+  value="$(read_config_value HEALTH_CHECK_SECONDS "${config}")"
+  [ "${value}" = "60" ] && log_ok "HEALTH_CHECK_SECONDS standaard 60" || { log_error "HEALTH_CHECK_SECONDS is '${value}', verwacht 60"; failed=1; }
 
   return "${failed}"
 }
@@ -376,6 +391,53 @@ test_state_directory_fix() {
     failed=1
   fi
 
+  if grep -q '^ReadWritePaths=' "${TEST_ROOT_DIR}/services/digitalsignage-health.service"; then
+    log_error "Healthservice gebruikt fragiele ReadWritePaths"
+    failed=1
+  else
+    log_ok "Healthservice gebruikt geen fragiele ReadWritePaths"
+  fi
+
+  if grep -q '^StateDirectory=digitalsignage$' "${TEST_ROOT_DIR}/services/digitalsignage-health.service"; then
+    log_ok "Healthservice gebruikt StateDirectory=digitalsignage"
+  else
+    log_error "Healthservice definieert geen StateDirectory=digitalsignage"
+    failed=1
+  fi
+
+  return "${failed}"
+}
+
+test_health_integration() {
+  local failed=0
+  grep -q 'digitalsignage-health.service' "${TEST_ROOT_DIR}/install/install.sh" && log_ok "Installer installeert healthservice" || { log_error "Installer verwerkt healthservice niet"; failed=1; }
+  grep -q 'digitalsignage-health.timer' "${TEST_ROOT_DIR}/install/install.sh" && log_ok "Installer installeert healthtimer" || { log_error "Installer verwerkt healthtimer niet"; failed=1; }
+  grep -q 'digitalsignage-health.timer.d' "${TEST_ROOT_DIR}/install/install.sh" && log_ok "Installer schrijft healthtimer-drop-in" || { log_error "Installer schrijft geen healthtimer-drop-in"; failed=1; }
+  grep -q 'digitalsignage-health.service' "${TEST_ROOT_DIR}/install/upgrade.sh" && log_ok "Upgrader werkt healthservice bij" || { log_error "Upgrader verwerkt healthservice niet"; failed=1; }
+  grep -q 'digitalsignage-health.timer' "${TEST_ROOT_DIR}/install/upgrade.sh" && log_ok "Upgrader werkt healthtimer bij" || { log_error "Upgrader verwerkt healthtimer niet"; failed=1; }
+  grep -q 'digitalsignage-health.timer' "${TEST_ROOT_DIR}/install/uninstall.sh" && log_ok "Uninstaller verwijdert healthtimer" || { log_error "Uninstaller verwerkt healthtimer niet"; failed=1; }
+  grep -q 'SuccessExitStatus=0 1' "${TEST_ROOT_DIR}/services/digitalsignage-health.service" && log_ok "Healthservice accepteert exitcode 1 als verwachte ongezonde status" || { log_error "SuccessExitStatus=0 1 ontbreekt"; failed=1; }
+
+  if grep -q 'sudo' "${TEST_ROOT_DIR}/scripts/health-check.py"; then
+    log_error "health-check.py bevat sudo"
+    failed=1
+  else
+    log_ok "health-check.py gebruikt geen sudo"
+  fi
+
+  if grep -q 'shell=True' "${TEST_ROOT_DIR}/scripts/health-check.py"; then
+    log_error "health-check.py gebruikt shell=True"
+    failed=1
+  else
+    log_ok "health-check.py gebruikt geen shell=True"
+  fi
+
+  if grep -E 'pkill|killall|reboot' "${TEST_ROOT_DIR}/scripts/health-check.py"; then
+    log_error "health-check.py bevat verboden herstelcommando"
+    failed=1
+  else
+    log_ok "health-check.py bevat geen pkill, killall of reboot"
+  fi
   return "${failed}"
 }
 
@@ -391,8 +453,10 @@ run_test "Uitvoerrechten installatie" test_installer_executable_modes
 run_test "Upgradeconfiguratie-merge" test_upgrade_config_merge
 run_test "Resource-logretentie" test_resource_log_retention
 run_test "Refresh-presentatie unit tests" test_refresh_presentation_unit
+run_test "Health-check unit tests" test_health_check_unit
 run_test "Verboden patronen" test_forbidden_patterns
 run_test "Configuratie" test_config
 run_test "Statusmap-oplossing" test_state_directory_fix
+run_test "Health-check integratie" test_health_integration
 
 print_summary
