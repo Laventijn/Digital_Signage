@@ -29,6 +29,48 @@ scripts/show-network-info.sh
 scripts/check-network.sh
 ```
 
+De kiosk gebruikt voor offlinegedrag niet alleen ping. De health-check ziet
+alleen volledige internetverbinding wanneer NetworkManager `full` meldt en de
+HTTP-controle slaagt:
+
+```bash
+nmcli -t -f CONNECTIVITY general
+curl --silent --show-error --fail --max-time 8 --output /dev/null https://clients3.google.com/generate_204
+```
+
+NetworkManager-waarden `limited`, `portal`, `none` en `unknown` tellen als niet
+volledig online. De status wordt bewaard in:
+
+```bash
+~/.local/state/digitalsignage/connectivity.state
+```
+
+Relevante logregels staan in:
+
+```bash
+tail -f ~/.local/state/digitalsignage/health.log
+```
+
+Voorbeelden:
+
+```text
+health=warning network=offline nm=limited http=failed action=keep_current_page reason=offline_grace_period
+health=warning network=offline action=show_offline_page reason=offline_threshold_reached
+health=ok network=online action=show_kiosk_page reason=connectivity_restored
+```
+
+Offlinepagina tijdelijk uitschakelen:
+
+```ini
+OFFLINE_PAGE_ENABLED=false
+```
+
+Voer daarna uit:
+
+```bash
+sudo bash install/upgrade.sh
+```
+
 ## Chromium hangt vast
 
 ```bash
@@ -81,8 +123,38 @@ systemctl --user status digitalsignage-health.timer --no-pager
 systemctl --user list-timers --all | grep digitalsignage
 tail -20 ~/.local/state/digitalsignage/health.log
 cat ~/.local/state/digitalsignage/health-state.json
+cat ~/.local/state/digitalsignage/connectivity.state
 journalctl --user -u digitalsignage-health.service -n 50 --no-pager
 ```
+
+## Handmatige Offline-Test Op De Pi
+
+Gebruik tijdelijk korte waarden in `/etc/digitalsignage/digitalsignage.conf`:
+
+```ini
+OFFLINE_AFTER_SECONDS=60
+ONLINE_CONFIRM_SECONDS=30
+```
+
+Veilige testprocedure:
+
+```bash
+sudo cp -p /etc/digitalsignage/digitalsignage.conf /etc/digitalsignage/digitalsignage.conf.backup-offline-test
+sudo nano /etc/digitalsignage/digitalsignage.conf
+sudo bash install/upgrade.sh
+systemctl --user restart digitalsignage-health.timer
+nmcli connection show --active
+nmcli connection down "<naam-van-actieve-verbinding>"
+tail -f ~/.local/state/digitalsignage/health.log
+nmcli connection up "<naam-van-actieve-verbinding>"
+sudo cp -p /etc/digitalsignage/digitalsignage.conf.backup-offline-test /etc/digitalsignage/digitalsignage.conf
+sudo bash install/upgrade.sh
+systemctl --user status digitalsignage-kiosk.service digitalsignage-health.timer --no-pager
+```
+
+Controleer tijdens de test dat de huidige presentatie tijdens de wachttijd
+zichtbaar blijft, daarna de offlinepagina verschijnt en na netwerkherstel plus
+bevestigingstijd de oorspronkelijke kiosk-URL terugkomt.
 
 Tijdelijk uitschakelen:
 

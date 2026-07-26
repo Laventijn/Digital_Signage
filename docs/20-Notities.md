@@ -18,13 +18,19 @@ services/digitalsignage-health.service
 services/digitalsignage-health.timer
 Fase 3 — Offline gedrag
 
-Daarna bouwen we een betrouwbare offlinewerking:
+Geimplementeerd op branch `fase-3-offline-gedrag`:
 
 bij tijdelijk netwerkverlies blijft de huidige presentatie zichtbaar;
 bij langdurig netwerkverlies verschijnt een lokale statische pagina;
 wanneer internet terugkomt, wordt automatisch teruggekeerd naar Google Slides;
 geen PHP of webserver nodig voor het offline scherm;
 netwerkcontrole via NetworkManager en een HTTP-controle, niet alleen via ping.
+
+Belangrijke locaties:
+
+`/opt/digitalsignage/offline/index.html`
+`~/.local/state/digitalsignage/connectivity.state`
+`~/.local/state/digitalsignage/health.log`
 Fase 4 — Installatie en upgrades
 
 Vervolgens maken we het systeem onderhoudbaar:

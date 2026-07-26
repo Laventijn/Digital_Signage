@@ -3,13 +3,33 @@ set -Eeuo pipefail
 
 CONFIG_FILE="${CONFIG_FILE:-/etc/digitalsignage/digitalsignage.conf}"
 
-if [ -f "${CONFIG_FILE}" ]; then
-  # shellcheck source=/dev/null
-  source "${CONFIG_FILE}"
-fi
+read_config_value() {
+  local key="$1"
+  local file="$2"
+  [ -f "${file}" ] || return 0
+  awk -F= -v key="${key}" '
+    /^[[:space:]]*#/ { next }
+    $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
+      value=$0
+      sub(/^[^=]*=/, "", value)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      gsub(/^"|"$/, "", value)
+      gsub(/^'\''|'\''$/, "", value)
+      print value
+      exit
+    }
+  ' "${file}"
+}
 
-PRESENTATION_URL="${PRESENTATION_URL:-}"
-OFFLINE_URL="${OFFLINE_URL:-file:///opt/digitalsignage/web/offline/index.html}"
+PRESENTATION_URL="$(read_config_value PRESENTATION_URL "${CONFIG_FILE}")"
+CHROMIUM_BIN="$(read_config_value CHROMIUM_BIN "${CONFIG_FILE}")"
+WAYLAND_DISPLAY="$(read_config_value WAYLAND_DISPLAY "${CONFIG_FILE}")"
+CHROMIUM_PROFILE_DIR="$(read_config_value CHROMIUM_PROFILE_DIR "${CONFIG_FILE}")"
+CHROMIUM_CACHE_DIR="$(read_config_value CHROMIUM_CACHE_DIR "${CONFIG_FILE}")"
+CACHE_SIZE_MB="$(read_config_value CACHE_SIZE_MB "${CONFIG_FILE}")"
+REMOTE_DEBUG_HOST="$(read_config_value REMOTE_DEBUG_HOST "${CONFIG_FILE}")"
+REMOTE_DEBUG_PORT="$(read_config_value REMOTE_DEBUG_PORT "${CONFIG_FILE}")"
+
 CHROMIUM_BIN="${CHROMIUM_BIN:-/usr/bin/chromium}"
 WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 CHROMIUM_PROFILE_DIR="${CHROMIUM_PROFILE_DIR:-.local/share/digitalsignage/chromium-profile}"
@@ -60,11 +80,6 @@ CACHE_SIZE_BYTES=$((CACHE_SIZE_MB * 1024 * 1024))
 
 mkdir -p "${PROFILE_DIR}" "${CACHE_DIR}"
 
-URL="${PRESENTATION_URL}"
-if ! /opt/digitalsignage/scripts/check-network.sh >/dev/null 2>&1; then
-  URL="${OFFLINE_URL}"
-fi
-
 exec "${CHROMIUM_BIN}" \
   --ozone-platform=wayland \
   --disable-gpu \
@@ -81,4 +96,4 @@ exec "${CHROMIUM_BIN}" \
   --remote-debugging-address="${REMOTE_DEBUG_HOST}" \
   --remote-debugging-port="${REMOTE_DEBUG_PORT}" \
   --remote-allow-origins="http://${REMOTE_DEBUG_HOST}:${REMOTE_DEBUG_PORT}" \
-  "${URL}"
+  "${PRESENTATION_URL}"
