@@ -1,0 +1,17 @@
+[Unit]
+Description=Digital Signage lokale presentatiecache bijwerken
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/digitalsignage/scripts/sync-presentation-cache.py
+SuccessExitStatus=0 10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/digitalsignage
+ReadOnlyPaths=/opt/digitalsignage/offline-player
+ReadOnlyPaths=/opt/digitalsignage/offline-fallback
+ReadWritePaths=/opt/digitalsignage/offline
