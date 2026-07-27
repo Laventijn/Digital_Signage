@@ -1,0 +1,12 @@
+[Unit]
+Description=Digital Signage lokale presentatiecache periodiek bijwerken
+
+[Timer]
+OnBootSec=45s
+OnUnitInactiveSec=900s
+AccuracySec=30s
+Persistent=true
+Unit=digitalsignage-presentation-cache.service
+
+[Install]
+WantedBy=timers.target
