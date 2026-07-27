@@ -1,6 +1,6 @@
 # Digital Signage configuratievoorbeeld
 # Plaats hier geen wachtwoorden, Wi-Fi-sleutels, tokens of andere geheimen.
-
+CONTENT_MODE="presentation"
 PRESENTATION_URL="https://docs.google.com/presentation/d/1cUJkZT8T8xVz6g9N_PrCgHIF7wcKQy1bIRtCutK9z5E/present?start=true&loop=true&delayms=5000"
 OFFLINE_URL="file:///opt/digitalsignage/web/offline/index.html"
 OFFLINE_PAGE_ENABLED=true
@@ -9,6 +9,12 @@ ONLINE_CONFIRM_SECONDS=30
 CONNECTIVITY_CHECK_URL="https://clients3.google.com/generate_204"
 CONNECTIVITY_TIMEOUT_SECONDS=8
 OFFLINE_PAGE_URL="file:///opt/digitalsignage/offline/index.html"
+PRESENTATION_CACHE_ENABLED=true
+PRESENTATION_CACHE_REFRESH_SECONDS=900
+PRESENTATION_CACHE_INCLUDE_SKIPPED_SLIDES=false
+PRESENTATION_CACHE_SLIDE_SECONDS=5
+PRESENTATION_CACHE_HTTP_TIMEOUT_SECONDS=20
+GOOGLE_SERVICE_ACCOUNT_FILE="/etc/digitalsignage/google-service-account.json"
 CHROMIUM_BIN="/usr/bin/chromium"
 WAYLAND_DISPLAY="wayland-0"
 CHROMIUM_PROFILE_DIR=".local/share/digitalsignage/chromium-profile"
@@ -29,8 +35,6 @@ HEALTH_HTTP_TIMEOUT_SECONDS=5
 HEALTH_STARTUP_GRACE_SECONDS=90
 HEALTH_LOG_RETENTION_DAYS=3
 HEALTH_LOG_MAX_BYTES=5242880
-
-# Desktopachtergrond die zichtbaar blijft wanneer Chromium nog niet actief is.
 DESKTOP_BACKGROUND_ENABLED=true
 DESKTOP_BACKGROUND_FILE="/opt/digitalsignage/assets/wallpapers/digitalsignage-background.png"
 DESKTOP_BACKGROUND_MODE=zoom
