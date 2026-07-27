@@ -34,6 +34,8 @@ if [ -n "${passwd_entry}" ]; then
   if [ -S "${user_bus}" ]; then
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user disable --now digitalsignage-health.timer 2>/dev/null || true
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user stop digitalsignage-health.service 2>/dev/null || true
+    runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user disable --now digitalsignage-screenshot-cache.timer 2>/dev/null || true
+    runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user stop digitalsignage-screenshot-cache.service 2>/dev/null || true
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user disable --now digitalsignage-resource-log.timer 2>/dev/null || true
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user disable --now digitalsignage-refresh.timer 2>/dev/null || true
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user disable --now digitalsignage-kiosk.service 2>/dev/null || true
@@ -45,6 +47,8 @@ if [ -n "${passwd_entry}" ]; then
   rm -f "${user_home}/.config/systemd/user/digitalsignage-resource-log.timer"
   rm -f "${user_home}/.config/systemd/user/digitalsignage-health.service"
   rm -f "${user_home}/.config/systemd/user/digitalsignage-health.timer"
+  rm -f "${user_home}/.config/systemd/user/digitalsignage-screenshot-cache.service"
+  rm -f "${user_home}/.config/systemd/user/digitalsignage-screenshot-cache.timer"
   rm -f "${user_home}/.config/systemd/user/digitalsignage-health.timer.d/interval.conf"
   rmdir "${user_home}/.config/systemd/user/digitalsignage-health.timer.d" 2>/dev/null || true
   chown -R "${KIOSK_USER}:${KIOSK_USER}" "${user_home}/.config" 2>/dev/null || true
@@ -67,6 +71,7 @@ echo "Verwijderd. Configuratie in /etc/digitalsignage en swaplogs blijven staan.
 echo "Een ICT-medewerker kan logs en state handmatig verwijderen met:"
 echo "  rm -f ~/.local/state/digitalsignage/swap.log ~/.local/state/digitalsignage/swap.log.1"
 echo "  rm -f ~/.local/state/digitalsignage/health.log ~/.local/state/digitalsignage/health.log.1 ~/.local/state/digitalsignage/health-state.json"
+echo "  rm -rf ~/.local/share/digitalsignage/screenshot-cache ~/.local/state/digitalsignage/screenshot-cache.log ~/.local/state/digitalsignage/screenshot-cache.log.1"
 echo
 echo "De desktopachtergrondconfiguratie in ~/.config/pcmanfm/LXDE-pi/desktop-items-0.conf blijft behouden."
 echo "Eventuele backups staan naast dat bestand als desktop-items-0.conf.backup.*."

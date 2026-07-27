@@ -7,7 +7,7 @@ set "PI_USER=bloemkool"
 set "PI_HOST=fmg-pi05.local"
 set "PI_PROJECT_DIR=/home/bloemkool/DigitalSignage"
 set "PI_TARGET=%PI_USER%@%PI_HOST%"
-set "PI_EXPECTED_BRANCH=fase-3-offline-gedrag"
+set "PI_EXPECTED_BRANCH=fase-3-1-screenshot-cache"
 set "PHASE3_TEST_MODE=full"
 
 if not "%~2"=="" (
@@ -27,8 +27,8 @@ if not "%~1"=="" (
 
 echo.
 echo ============================================================
-echo Digital Signage - Fase 3-test
-echo Betrouwbaar offline gedrag en automatisch herstel
+echo Digital Signage - Fase 3.1-test
+echo Betrouwbaar offline gedrag met lokale screenshotcache
 echo ============================================================
 echo Raspberry Pi: %PI_TARGET%
 echo Projectpad: %PI_PROJECT_DIR%
@@ -187,7 +187,7 @@ ERROR_COUNT=0
 SKIPPED_COUNT=0
 
 TEST_MODE="${PHASE3_TEST_MODE:-full}"
-EXPECTED_BRANCH="${PI_EXPECTED_BRANCH:-fase-3-offline-gedrag}"
+EXPECTED_BRANCH="${PI_EXPECTED_BRANCH:-fase-3-1-screenshot-cache}"
 PROJECT_DIR="${DIGITALSIGNAGE_PROJECT_DIR:-}"
 ACTIVE_CONFIG="/etc/digitalsignage/digitalsignage.conf"
 INVALID_TEST_URL="https://dit-domein-bestaat-niet.invalid/"
@@ -259,6 +259,13 @@ finish() {
     [ "${RECOVERY_PROVED}" = true ] && printf 'Internetherstel: kioskpagina keerde terug\n' || printf 'Internetherstel: NIET BEWEZEN\n'
     [ "${PID_STABLE_PROVED}" = true ] && printf 'Kioskherstart tijdens netwerkverlies: nee\n' || printf 'Kioskherstart tijdens netwerkverlies: NIET BEWEZEN\n'
     [ "${CONFIG_RESTORED_PROVED}" = true ] && printf 'Configuratie hersteld: ja\n' || printf 'Configuratie hersteld: NIET BEWEZEN\n'
+    printf 'Screenshotcache aangemaakt: zie Fase 3.1-logcontrole op de Pi\n'
+    printf 'Verborgen dia overgeslagen: zie fixturetest op de Pi\n'
+    printf 'Watermerk aanwezig: zie opgeslagen PNG-controle op de Pi\n'
+    printf 'Offline screenshotcache getoond: zie healthlog action=show_screenshot_cache\n'
+    printf 'Kioskherstart tijdens test: %s\n' "$([ "${PID_STABLE_PROVED}" = true ] && printf 'nee' || printf 'NIET BEWEZEN')"
+    printf 'Websitemodus gescheiden: zie unit-test test_screenshot_cache.py\n'
+    printf 'Cache hersteld: bestaande cache wordt door deze test niet automatisch verwijderd\n'
   fi
 
   if [ "${ERROR_COUNT}" -eq 0 ]; then

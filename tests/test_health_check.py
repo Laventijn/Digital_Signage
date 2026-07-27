@@ -240,6 +240,7 @@ class HealthCheckTests(unittest.TestCase):
         with mock.patch.object(health, "navigate_if_needed", return_value=(True, "ok")) as navigate:
             action = health.process_connectivity(state, connectivity, browser, config, 1300, True)
         self.assertEqual(action.action, "show_offline_page")
+        self.assertEqual(action.reason, "screenshot_cache_unavailable")
         self.assertTrue(action.state["OFFLINE_PAGE_SHOWN"])
         navigate.assert_called_once()
 
@@ -305,9 +306,9 @@ class HealthCheckTests(unittest.TestCase):
             "CONNECTIVITY_TIMEOUT_SECONDS": "x",
             "OFFLINE_PAGE_ENABLED": "misschien",
         })
-        self.assertEqual(config.offline_after_seconds, 300)
+        self.assertEqual(config.offline_after_seconds, 45)
         self.assertEqual(config.online_confirm_seconds, 30)
-        self.assertEqual(config.connectivity_timeout_seconds, 8)
+        self.assertEqual(config.connectivity_timeout_seconds, 5)
         self.assertTrue(config.offline_page_enabled)
         self.assertGreaterEqual(len(config.warnings), 4)
 

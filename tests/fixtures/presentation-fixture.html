@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <title>Presentatie fixture</title>
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; background: #111; color: #fff; font-family: Arial, sans-serif; }
+    .slide { display: none; width: 100vw; height: 100vh; place-items: center; font-size: 8vw; }
+    .active { display: grid; }
+    .one { background: #14532d; }
+    .two { background: #7c2d12; }
+    .hidden { background: #581c87; }
+    .three { background: #1e3a8a; }
+  </style>
+</head>
+<body>
+  <section class="slide one active" data-slide-id="visible-1">Zichtbare dia 1</section>
+  <section class="slide two" data-slide-id="visible-2">Zichtbare dia 2</section>
+  <section class="slide hidden" data-slide-id="hidden">Verborgen dia</section>
+  <section class="slide three" data-slide-id="visible-3">Zichtbare dia 3</section>
+  <script>
+    const visible = ['visible-1', 'visible-2', 'visible-3'];
+    let index = 0;
+    function show() {
+      document.querySelectorAll('.slide').forEach((slide) => slide.classList.remove('active'));
+      const id = visible[index % visible.length];
+      document.querySelector(`[data-slide-id="${id}"]`).classList.add('active');
+      history.replaceState(null, '', `?slide=${encodeURIComponent(id)}`);
+      index += 1;
+    }
+    setInterval(show, 1000);
+    show();
+  </script>
+</body>
+</html>

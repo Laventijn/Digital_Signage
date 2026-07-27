@@ -19,6 +19,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
 try:
     import pwd
 except ImportError:  # pragma: no cover - alleen relevant voor lokale Windows-tests
@@ -32,19 +36,28 @@ except ImportError as exc:  # pragma: no cover - afhankelijk van het Pi-pakket
 else:
     WEBSOCKET_IMPORT_ERROR = None
 
+from digitalsignage_config import (
+    build_content_config,
+    screenshot_cache_index_url,
+    validate_current_cache,
+)
+
 
 CONFIG_FILE = Path(os.environ.get("CONFIG_FILE", "/etc/digitalsignage/digitalsignage.conf"))
 KIOSK_SERVICE = "digitalsignage-kiosk.service"
 
 DEFAULTS: dict[str, str] = {
+    "CONTENT_MODE": "presentation",
+    "CONTENT_URL": "",
     "PRESENTATION_URL": "",
+    "SCREENSHOT_CACHE_ENABLED": "true",
     "OFFLINE_URL": "file:///opt/digitalsignage/web/offline/index.html",
     "OFFLINE_PAGE_URL": "file:///opt/digitalsignage/offline/index.html",
     "OFFLINE_PAGE_ENABLED": "true",
-    "OFFLINE_AFTER_SECONDS": "300",
+    "OFFLINE_AFTER_SECONDS": "45",
     "ONLINE_CONFIRM_SECONDS": "30",
     "CONNECTIVITY_CHECK_URL": "https://clients3.google.com/generate_204",
-    "CONNECTIVITY_TIMEOUT_SECONDS": "8",
+    "CONNECTIVITY_TIMEOUT_SECONDS": "5",
     "REMOTE_DEBUG_HOST": "127.0.0.1",
     "REMOTE_DEBUG_PORT": "9222",
     "KIOSK_USER": "",
@@ -76,6 +89,10 @@ DEFAULT_CONNECTIVITY_STATE: dict[str, Any] = {
 @dataclass
 class HealthConfig:
     presentation_url: str
+    content_mode: str
+    content_url: str
+    effective_url: str
+    screenshot_cache_enabled: bool
     offline_url: str
     offline_page_url: str
     offline_page_enabled: bool
@@ -177,15 +194,21 @@ def bool_config(config: dict[str, str], key: str, default: bool, warnings: list[
 
 def build_config(raw: dict[str, str]) -> HealthConfig:
     warnings: list[str] = []
+    content = build_content_config(raw)
+    warnings.extend(content.warnings)
     return HealthConfig(
         presentation_url=raw.get("PRESENTATION_URL", "").strip(),
+        content_mode=content.mode,
+        content_url=content.content_url,
+        effective_url=content.effective_url,
+        screenshot_cache_enabled=content.screenshot_cache_enabled,
         offline_url=raw.get("OFFLINE_URL", DEFAULTS["OFFLINE_URL"]).strip(),
         offline_page_url=raw.get("OFFLINE_PAGE_URL", DEFAULTS["OFFLINE_PAGE_URL"]).strip() or DEFAULTS["OFFLINE_PAGE_URL"],
         offline_page_enabled=bool_config(raw, "OFFLINE_PAGE_ENABLED", True, warnings),
-        offline_after_seconds=int_config(raw, "OFFLINE_AFTER_SECONDS", 300, minimum=1, warnings=warnings),
+        offline_after_seconds=int_config(raw, "OFFLINE_AFTER_SECONDS", 45, minimum=1, warnings=warnings),
         online_confirm_seconds=int_config(raw, "ONLINE_CONFIRM_SECONDS", 30, minimum=0, warnings=warnings),
         connectivity_check_url=raw.get("CONNECTIVITY_CHECK_URL", DEFAULTS["CONNECTIVITY_CHECK_URL"]).strip() or DEFAULTS["CONNECTIVITY_CHECK_URL"],
-        connectivity_timeout_seconds=int_config(raw, "CONNECTIVITY_TIMEOUT_SECONDS", 8, minimum=1, warnings=warnings),
+        connectivity_timeout_seconds=int_config(raw, "CONNECTIVITY_TIMEOUT_SECONDS", 5, minimum=1, warnings=warnings),
         remote_debug_host=raw.get("REMOTE_DEBUG_HOST", DEFAULTS["REMOTE_DEBUG_HOST"]).strip() or DEFAULTS["REMOTE_DEBUG_HOST"],
         remote_debug_port=int_config(raw, "REMOTE_DEBUG_PORT", 9222, warnings=warnings),
         kiosk_user=raw.get("KIOSK_USER", "").strip() or current_user_name(),
@@ -357,11 +380,15 @@ def same_url(left: str, right: str) -> bool:
     return bool(left and right and normalized_url(left) == normalized_url(right))
 
 
-def is_valid_kiosk_url(target_url: str, presentation_url: str, offline_url: str) -> str | None:
+def is_valid_kiosk_url(target_url: str, presentation_url: str, offline_url: str, effective_url: str = "", screenshot_cache_url: str = "") -> str | None:
     if not target_url:
         return None
     if offline_url and same_url(target_url, offline_url):
         return "offline"
+    if screenshot_cache_url and same_url(target_url, screenshot_cache_url):
+        return "screenshot_cache"
+    if effective_url and same_url(target_url, effective_url):
+        return "content"
     if presentation_url and same_url(target_url, presentation_url):
         return "presentation"
 
@@ -457,7 +484,11 @@ def find_valid_page(targets: list[dict[str, Any]], config: HealthConfig) -> tupl
             first_websocket_url = websocket_url
         if not target_url or not websocket_url:
             continue
-        page_type = is_valid_kiosk_url(target_url, config.presentation_url, config.offline_page_url)
+        try:
+            cache_url = screenshot_cache_index_url(kiosk_home(config.kiosk_user))
+        except RuntimeError:
+            cache_url = ""
+        page_type = is_valid_kiosk_url(target_url, config.presentation_url, config.offline_page_url, config.effective_url, cache_url)
         if page_type:
             return page_type, target_url, websocket_url
     if not saw_page:
@@ -617,6 +648,22 @@ def navigate_if_needed(result: CheckResult, target_url: str) -> tuple[bool, str]
     return navigate_page(result.websocket_url, target_url)
 
 
+def valid_screenshot_cache_url(config: HealthConfig) -> tuple[str, str]:
+    if not config.screenshot_cache_enabled:
+        return "", "screenshot_cache_disabled"
+    try:
+        home = kiosk_home(config.kiosk_user)
+    except RuntimeError:
+        return "", "screenshot_cache_unavailable"
+    ok, reason, manifest = validate_current_cache(home)
+    if not ok:
+        return "", "screenshot_cache_unavailable"
+    cache_mode = str(manifest.get("mode", "")) if manifest else ""
+    if cache_mode not in {"presentation", "website"}:
+        return "", "screenshot_cache_unavailable"
+    return screenshot_cache_index_url(home), "ok"
+
+
 def process_connectivity(
     state: dict[str, Any],
     connectivity: ConnectivityResult,
@@ -643,16 +690,19 @@ def process_connectivity(
         offline_duration = max(0, reference_timestamp - offline_since)
         if offline_duration < config.offline_after_seconds:
             return ConnectivityAction(state, "keep_current_page", "offline_grace_period")
-        if bool(state.get("OFFLINE_PAGE_SHOWN", False)) and same_url(browser.page_url, config.offline_page_url):
+        cache_url, cache_reason = valid_screenshot_cache_url(config)
+        offline_target_url = cache_url or config.offline_page_url
+        offline_action = "show_screenshot_cache" if cache_url else "show_offline_page"
+        if bool(state.get("OFFLINE_PAGE_SHOWN", False)) and same_url(browser.page_url, offline_target_url):
             return ConnectivityAction(state, "none", "offline_page_already_visible")
         if not allow_navigation or not browser.ok:
-            return ConnectivityAction(state, "show_offline_page", "offline_threshold_reached")
-        navigation_ok, navigation_reason = navigate_if_needed(browser, config.offline_page_url)
+            return ConnectivityAction(state, offline_action, "offline_threshold_reached" if cache_url else cache_reason)
+        navigation_ok, navigation_reason = navigate_if_needed(browser, offline_target_url)
         if navigation_ok:
             state["OFFLINE_PAGE_SHOWN"] = True
             if navigation_reason == "already_visible":
                 return ConnectivityAction(state, "none", "offline_page_already_visible")
-            return ConnectivityAction(state, "show_offline_page", "offline_threshold_reached")
+            return ConnectivityAction(state, offline_action, "offline_threshold_reached" if cache_url else cache_reason)
         return ConnectivityAction(state, "navigation_failed", "offline_navigation_failed")
 
     if offline_since == 0 and not bool(state.get("OFFLINE_PAGE_SHOWN", False)) and online_since == 0:
@@ -690,11 +740,11 @@ def process_connectivity(
         "ONLINE_SINCE": 0,
         "OFFLINE_PAGE_SHOWN": False,
     }
-    if same_url(browser.page_url, config.presentation_url):
+    if same_url(browser.page_url, config.effective_url):
         return ConnectivityAction(reset_state, "none", "kiosk_page_already_visible")
     if not allow_navigation or not browser.ok:
         return ConnectivityAction(state, "show_kiosk_page", "connectivity_restored")
-    navigation_ok, navigation_reason = navigate_if_needed(browser, config.presentation_url)
+    navigation_ok, navigation_reason = navigate_if_needed(browser, config.effective_url)
     if navigation_ok:
         if navigation_reason == "already_visible":
             return ConnectivityAction(reset_state, "none", "kiosk_page_already_visible")
@@ -793,6 +843,7 @@ def log_line(
     action: str,
     restart_skipped: str | None,
     reason: str,
+    cache_mode: str = "",
 ) -> str:
     health_value = result.health
     if result.ok and not connectivity.online:
@@ -808,6 +859,7 @@ def log_line(
         f"pid={result.pid}",
         f"debug_port={result.debug_port}",
         f"page={result.page}",
+        f"content_mode={cache_mode}",
         f"network={connectivity.status}",
         f"nm={connectivity.nm}",
         f"http={connectivity.http}",
@@ -819,6 +871,8 @@ def log_line(
         parts.append(f"network_reason={connectivity.reason}")
     if restart_skipped:
         parts.append(f"restart_skipped={restart_skipped}")
+    if action == "show_screenshot_cache":
+        parts.append(f"cache_mode={cache_mode}")
     return " ".join(parts)
 
 
@@ -889,7 +943,7 @@ def main(argv: list[str] | None = None) -> int:
 
     action = browser_action if browser_action != "none" else connectivity_action.action
     reason = result.reason if browser_action != "none" or not result.ok else connectivity_action.reason
-    line = log_line(reference_time, result, connectivity, int(new_state.get("consecutive_failures", 0)), action, restart_skipped, reason)
+    line = log_line(reference_time, result, connectivity, int(new_state.get("consecutive_failures", 0)), action, restart_skipped, reason, config.content_mode)
     write_log_line(log_file, config, line, reference_time)
     print(line)
     return exitcode

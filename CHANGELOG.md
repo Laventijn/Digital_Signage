@@ -2,6 +2,14 @@
 
 Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 
+## Fase 3.1
+
+- Accountvrije lokale screenshotcache toegevoegd voor `presentation` en `website`.
+- `CONTENT_MODE` en `CONTENT_URL` toegevoegd; `PRESENTATION_URL` blijft fallback voor bestaande installaties.
+- Aparte headless Chromium-opname via `digitalsignage-screenshot-cache.service` en timer toegevoegd.
+- Health-check toont bij offline eerst een geldige screenshotcache en anders de bestaande offlinepagina.
+- Documentatie toegevoegd in `docs/21-screenshot-cache.md`.
+
 ## 0.1.0
 
 - Initiële projectstructuur toegevoegd.

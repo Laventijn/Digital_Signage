@@ -115,6 +115,8 @@ test_repository() {
     "install/uninstall.sh"
     "scripts/start-kiosk.sh"
     "scripts/refresh-presentation.py"
+    "scripts/capture-content-cache.py"
+    "scripts/digitalsignage_config.py"
     "scripts/log-resources.py"
     "scripts/health-check.py"
     "scripts/configure-desktop-background.sh"
@@ -126,6 +128,11 @@ test_repository() {
     "services/digitalsignage-resource-log.timer"
     "services/digitalsignage-health.service"
     "services/digitalsignage-health.timer"
+    "services/digitalsignage-screenshot-cache.service"
+    "services/digitalsignage-screenshot-cache.timer"
+    "assets/screenshot-player/index.html"
+    "assets/screenshot-player/player.css"
+    "assets/screenshot-player/player.js"
     "config/digitalsignage.conf.example"
     "tests/test-upgrade-config-merge.sh"
     "tests/test-resource-log-retention.py"
@@ -186,7 +193,7 @@ test_bash_syntax() {
 test_python_syntax() {
   local pycache_dir
   pycache_dir="$(mktemp -d)"
-  if PYTHONPYCACHEPREFIX="${pycache_dir}" python3 -m py_compile "${TEST_ROOT_DIR}/scripts/health-check.py" "${TEST_ROOT_DIR}/scripts/refresh-presentation.py" "${TEST_ROOT_DIR}/scripts/log-resources.py" "${TEST_ROOT_DIR}/tests/test_health_check.py" "${TEST_ROOT_DIR}/tests/test-resource-log-retention.py" "${TEST_ROOT_DIR}/tests/test-refresh-presentation.py"; then
+  if PYTHONPYCACHEPREFIX="${pycache_dir}" python3 -m py_compile "${TEST_ROOT_DIR}/scripts/health-check.py" "${TEST_ROOT_DIR}/scripts/refresh-presentation.py" "${TEST_ROOT_DIR}/scripts/capture-content-cache.py" "${TEST_ROOT_DIR}/scripts/digitalsignage_config.py" "${TEST_ROOT_DIR}/scripts/log-resources.py" "${TEST_ROOT_DIR}/tests/test_health_check.py" "${TEST_ROOT_DIR}/tests/test_screenshot_cache.py" "${TEST_ROOT_DIR}/tests/test-resource-log-retention.py" "${TEST_ROOT_DIR}/tests/test-refresh-presentation.py"; then
     log_ok "Python-syntaxis is geldig"
   else
     rm -rf "${pycache_dir}"
@@ -201,7 +208,7 @@ test_python_syntax() {
 test_systemd_units() {
   local failed=0
   local output status unit
-  for unit in services/digitalsignage-kiosk.service services/digitalsignage-refresh.service services/digitalsignage-refresh.timer services/digitalsignage-resource-log.service services/digitalsignage-resource-log.timer services/digitalsignage-health.service services/digitalsignage-health.timer; do
+  for unit in services/digitalsignage-kiosk.service services/digitalsignage-refresh.service services/digitalsignage-refresh.timer services/digitalsignage-resource-log.service services/digitalsignage-resource-log.timer services/digitalsignage-health.service services/digitalsignage-health.timer services/digitalsignage-screenshot-cache.service services/digitalsignage-screenshot-cache.timer; do
     output="$(systemd-analyze --user verify "${TEST_ROOT_DIR}/${unit}" 2>&1)"
     status=$?
     if [ -n "${output}" ]; then
@@ -312,6 +319,15 @@ test_health_check_unit() {
   fi
 }
 
+test_screenshot_cache_unit() {
+  if python3 -m unittest "${TEST_ROOT_DIR}/tests/test_screenshot_cache.py"; then
+    log_ok "Screenshotcache unit tests slagen"
+  else
+    log_error "Screenshotcache unit tests falen"
+    return 1
+  fi
+}
+
 test_desktop_background_unit() {
   if bash "${TEST_ROOT_DIR}/tests/test-desktop-background.sh"; then
     log_ok "Desktopachtergrondtests slagen"
@@ -325,7 +341,7 @@ test_forbidden_patterns() {
   local failed=0
   local pattern
   local home_prefix="/home"
-  for pattern in "${home_prefix}/pi" "${home_prefix}/bloemkool" 'chromium-browser' 'DISPLAY=:0' 'export DISPLAY' 'DISPLAY_ID' 'xdotool' 'pkill -HUP' 'shell=True' 'pkill' 'killall' 'sudo systemctl' 'wayfire.ini'; do
+  for pattern in "${home_prefix}/pi" "${home_prefix}/bloemkool" 'chromium-browser' 'DISPLAY=:0' 'export DISPLAY' 'DISPLAY_ID' 'xdotool' 'pkill -HUP' 'shell=True' 'pkill' 'killall' 'sudo systemctl' 'wayfire.ini' 'google-service-account.json' 'Google Slides API' 'serviceaccount'; do
     if grep -R -n -F --exclude-dir=__pycache__ --exclude='*.pyc' --exclude='*.pyo' "${pattern}" "${TEST_ROOT_DIR}/install" "${TEST_ROOT_DIR}/scripts" "${TEST_ROOT_DIR}/services" "${TEST_ROOT_DIR}/config"; then
       log_error "Verboden patroon gevonden: ${pattern}"
       failed=1
@@ -340,7 +356,7 @@ test_config() {
   local failed=0
   local config="${TEST_ROOT_DIR}/config/digitalsignage.conf.example"
   local key value
-  for key in PRESENTATION_URL OFFLINE_URL CHROMIUM_BIN WAYLAND_DISPLAY REMOTE_DEBUG_HOST REMOTE_DEBUG_PORT CACHE_SIZE_MB KIOSK_USER REFRESH_SECONDS SWAP_LOG_MAX_BYTES RESOURCE_LOG_RETENTION_DAYS HEALTH_CHECK_SECONDS HEALTH_FAILURE_THRESHOLD HEALTH_RESTART_COOLDOWN_SECONDS HEALTH_HTTP_TIMEOUT_SECONDS HEALTH_STARTUP_GRACE_SECONDS HEALTH_LOG_RETENTION_DAYS HEALTH_LOG_MAX_BYTES DESKTOP_BACKGROUND_ENABLED DESKTOP_BACKGROUND_FILE DESKTOP_BACKGROUND_MODE; do
+  for key in CONTENT_MODE CONTENT_URL PRESENTATION_URL SCREENSHOT_CACHE_ENABLED SCREENSHOT_CACHE_REFRESH_SECONDS SCREENSHOT_CAPTURE_DEBUG_PORT OFFLINE_WATERMARK_TEXT WEBSITE_OFFLINE_CAPTURE_MODE OFFLINE_URL CHROMIUM_BIN WAYLAND_DISPLAY REMOTE_DEBUG_HOST REMOTE_DEBUG_PORT CACHE_SIZE_MB KIOSK_USER REFRESH_SECONDS SWAP_LOG_MAX_BYTES RESOURCE_LOG_RETENTION_DAYS HEALTH_CHECK_SECONDS HEALTH_FAILURE_THRESHOLD HEALTH_RESTART_COOLDOWN_SECONDS HEALTH_HTTP_TIMEOUT_SECONDS HEALTH_STARTUP_GRACE_SECONDS HEALTH_LOG_RETENTION_DAYS HEALTH_LOG_MAX_BYTES DESKTOP_BACKGROUND_ENABLED DESKTOP_BACKGROUND_FILE DESKTOP_BACKGROUND_MODE; do
     if [ -n "$(read_config_value "${key}" "${config}")" ]; then
       log_ok "Configvariabele aanwezig: ${key}"
     else
@@ -358,7 +374,7 @@ test_config() {
   value="$(read_config_value REFRESH_SECONDS "${config}")"
   [ "${value}" = "300" ] && log_ok "REFRESH_SECONDS standaard 300" || { log_error "REFRESH_SECONDS is '${value}', verwacht 300"; failed=1; }
   value="$(read_config_value HEALTH_CHECK_SECONDS "${config}")"
-  [ "${value}" = "60" ] && log_ok "HEALTH_CHECK_SECONDS standaard 60" || { log_error "HEALTH_CHECK_SECONDS is '${value}', verwacht 60"; failed=1; }
+  [ "${value}" = "15" ] && log_ok "HEALTH_CHECK_SECONDS standaard 15" || { log_error "HEALTH_CHECK_SECONDS is '${value}', verwacht 15"; failed=1; }
   value="$(read_config_value DESKTOP_BACKGROUND_ENABLED "${config}")"
   [ "${value}" = "true" ] && log_ok "DESKTOP_BACKGROUND_ENABLED standaard true" || { log_error "DESKTOP_BACKGROUND_ENABLED is '${value}', verwacht true"; failed=1; }
   value="$(read_config_value DESKTOP_BACKGROUND_FILE "${config}")"
@@ -501,6 +517,7 @@ run_test "Upgradeconfiguratie-merge" test_upgrade_config_merge
 run_test "Resource-logretentie" test_resource_log_retention
 run_test "Refresh-presentatie unit tests" test_refresh_presentation_unit
 run_test "Health-check unit tests" test_health_check_unit
+run_test "Screenshotcache unit tests" test_screenshot_cache_unit
 run_test "Desktopachtergrondtests" test_desktop_background_unit
 run_test "Verboden patronen" test_forbidden_patterns
 run_test "Configuratie" test_config

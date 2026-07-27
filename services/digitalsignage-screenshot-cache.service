@@ -1,0 +1,15 @@
+[Unit]
+Description=Digital Signage lokale screenshotcache bijwerken
+Documentation=file:/opt/digitalsignage/docs/21-screenshot-cache.md
+
+[Service]
+Type=oneshot
+ExecStart=/opt/digitalsignage/scripts/capture-content-cache.py
+Environment=CONFIG_FILE=/etc/digitalsignage/digitalsignage.conf
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadOnlyPaths=/etc/digitalsignage
+ReadWritePaths=%h/.local/share/digitalsignage %h/.local/state/digitalsignage
+WorkingDirectory=%h

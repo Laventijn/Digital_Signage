@@ -1,0 +1,11 @@
+[Unit]
+Description=Digital Signage periodieke screenshotcache
+
+[Timer]
+OnBootSec=900s
+OnUnitInactiveSec=900s
+AccuracySec=60s
+Unit=digitalsignage-screenshot-cache.service
+
+[Install]
+WantedBy=timers.target

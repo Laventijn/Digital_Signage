@@ -21,6 +21,8 @@ read_config_value() {
   ' "${file}"
 }
 
+CONTENT_MODE="$(read_config_value CONTENT_MODE "${CONFIG_FILE}")"
+CONTENT_URL="$(read_config_value CONTENT_URL "${CONFIG_FILE}")"
 PRESENTATION_URL="$(read_config_value PRESENTATION_URL "${CONFIG_FILE}")"
 CHROMIUM_BIN="$(read_config_value CHROMIUM_BIN "${CONFIG_FILE}")"
 WAYLAND_DISPLAY="$(read_config_value WAYLAND_DISPLAY "${CONFIG_FILE}")"
@@ -37,9 +39,19 @@ CHROMIUM_CACHE_DIR="${CHROMIUM_CACHE_DIR:-.cache/digitalsignage/chromium}"
 CACHE_SIZE_MB="${CACHE_SIZE_MB:-100}"
 REMOTE_DEBUG_HOST="${REMOTE_DEBUG_HOST:-127.0.0.1}"
 REMOTE_DEBUG_PORT="${REMOTE_DEBUG_PORT:-9222}"
+CONTENT_MODE="${CONTENT_MODE:-presentation}"
+EFFECTIVE_CONTENT_URL="${CONTENT_URL:-${PRESENTATION_URL}}"
 
-if [ -z "${PRESENTATION_URL}" ]; then
-  echo "Fout: PRESENTATION_URL ontbreekt in ${CONFIG_FILE}." >&2
+case "${CONTENT_MODE}" in
+  presentation|website) ;;
+  *)
+    echo "Fout: CONTENT_MODE moet 'presentation' of 'website' zijn." >&2
+    exit 1
+    ;;
+esac
+
+if [ -z "${EFFECTIVE_CONTENT_URL}" ]; then
+  echo "Fout: CONTENT_URL ontbreekt en PRESENTATION_URL is leeg in ${CONFIG_FILE}." >&2
   exit 1
 fi
 
@@ -96,4 +108,4 @@ exec "${CHROMIUM_BIN}" \
   --remote-debugging-address="${REMOTE_DEBUG_HOST}" \
   --remote-debugging-port="${REMOTE_DEBUG_PORT}" \
   --remote-allow-origins="http://${REMOTE_DEBUG_HOST}:${REMOTE_DEBUG_PORT}" \
-  "${PRESENTATION_URL}"
+  "${EFFECTIVE_CONTENT_URL}"

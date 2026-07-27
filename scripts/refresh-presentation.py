@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Vernieuwt het bestaande Google Slides-tabblad via Chrome DevTools Protocol."""
+"""Vernieuwt het bestaande kiosk-tabblad via Chrome DevTools Protocol."""
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -59,6 +60,23 @@ def int_config(config: dict[str, str], key: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def bool_config(config: dict[str, str], key: str, default: bool) -> bool:
+    value = str(config.get(key, str(default))).strip().lower()
+    if value in {"1", "true", "yes", "ja", "on"}:
+        return True
+    if value in {"0", "false", "no", "nee", "off"}:
+        return False
+    return default
+
+
+def content_mode(config: dict[str, str]) -> str:
+    return config.get("CONTENT_MODE", "presentation").strip().lower() or "presentation"
+
+
+def effective_content_url(config: dict[str, str]) -> str:
+    return config.get("CONTENT_URL", "").strip() or config.get("PRESENTATION_URL", "").strip()
+
+
 def fetch_targets(host: str, port: int) -> list[dict[str, object]]:
     url = f"http://{host}:{port}/json"
     try:
@@ -68,7 +86,7 @@ def fetch_targets(host: str, port: int) -> list[dict[str, object]]:
         raise RefreshError(f"Kan Chromium-tabbladen niet ophalen via {url}: {exc}") from exc
 
 
-def find_presentation_target(targets: list[dict[str, object]]) -> dict[str, object]:
+def find_kiosk_target(targets: list[dict[str, object]]) -> dict[str, object]:
     first_page_target = None
     for target in targets:
         if target.get("type") != "page":
@@ -80,22 +98,50 @@ def find_presentation_target(targets: list[dict[str, object]]) -> dict[str, obje
             return target
     if first_page_target is not None:
         return first_page_target
-    raise RefreshError("Geen bestaand Google Slides-tabblad gevonden.")
+    raise RefreshError("Geen bestaand kiosk-tabblad gevonden.")
+
+
+def find_presentation_target(targets: list[dict[str, object]]) -> dict[str, object]:
+    """Compatibele alias voor oudere tests en scripts."""
+    return find_kiosk_target(targets)
+
+
+def trigger_screenshot_capture(config: dict[str, str]) -> None:
+    mode = content_mode(config)
+    if mode not in {"presentation", "website"}:
+        return
+    if not bool_config(config, "SCREENSHOT_CACHE_ENABLED", True):
+        return
+    # De opname loopt asynchroon in een aparte user-service. De refresh wacht
+    # niet op de headless Chromium en raakt de actieve kiosk niet aan.
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "start", "digitalsignage-screenshot-cache.service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
 
 
 def navigate_presentation(config: dict[str, str]) -> None:
-    presentation_url = config.get("PRESENTATION_URL", "").strip()
-    if not presentation_url:
-        raise RefreshError("PRESENTATION_URL ontbreekt in de configuratie.")
+    mode = content_mode(config)
+    if mode not in {"presentation", "website"}:
+        raise RefreshError("CONTENT_MODE moet 'presentation' of 'website' zijn.")
+    target_url = effective_content_url(config)
+    if not target_url:
+        raise RefreshError("CONTENT_URL ontbreekt en PRESENTATION_URL is leeg.")
     if websocket is None:
         raise RefreshError(f"Pythonpakket websocket ontbreekt: {WEBSOCKET_IMPORT_ERROR}")
 
     host = config.get("REMOTE_DEBUG_HOST", DEFAULT_REMOTE_DEBUG_HOST)
     port = int_config(config, "REMOTE_DEBUG_PORT", DEFAULT_REMOTE_DEBUG_PORT)
-    target = find_presentation_target(fetch_targets(host, port))
+    target = find_kiosk_target(fetch_targets(host, port))
     ws_url = str(target.get("webSocketDebuggerUrl", ""))
     if not ws_url:
-        raise RefreshError("Google Slides-tabblad heeft geen webSocketDebuggerUrl.")
+        raise RefreshError("Kiosk-tabblad heeft geen webSocketDebuggerUrl.")
 
     ws = None
     try:
@@ -103,7 +149,7 @@ def navigate_presentation(config: dict[str, str]) -> None:
         ws.send(json.dumps({
             "id": 1,
             "method": "Page.navigate",
-            "params": {"url": presentation_url},
+            "params": {"url": target_url},
         }))
         response = json.loads(ws.recv())
         if response.get("id") != 1:
@@ -115,6 +161,7 @@ def navigate_presentation(config: dict[str, str]) -> None:
     finally:
         if ws is not None:
             ws.close()
+    trigger_screenshot_capture(config)
 
 
 def main() -> int:

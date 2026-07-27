@@ -11,11 +11,12 @@ Het doelplatform is Raspberry Pi OS Trixie 64-bit met Wayland/labwc en Chromium 
 - Voorbeeldconfiguratie staat in `config/`.
 - De vaste desktopachtergrond staat in `assets/wallpapers/`.
 - Offline fallbackpagina staat in `assets/offline/` en wordt geinstalleerd naar `/opt/digitalsignage/offline/`.
+- Lokale screenshotcache wordt uitgelegd in `docs/21-screenshot-cache.md`.
 
 ## Snelle start
 
 1. Kopieer `config/digitalsignage.conf.example` naar `/etc/digitalsignage/digitalsignage.conf`.
-2. Pas `PRESENTATION_URL` en kiosk-instellingen aan.
+2. Pas `CONTENT_MODE`, `CONTENT_URL` en kiosk-instellingen aan. Oudere installaties kunnen `PRESENTATION_URL` blijven gebruiken als fallback.
 3. Voer de installatie uit:
 
 ```bash

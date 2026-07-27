@@ -47,14 +47,14 @@ def test_empty_target_list() -> None:
     def scenario(module):
         module.find_presentation_target([])
 
-    expect_refresh_error(scenario, "Geen bestaand Google Slides-tabblad")
+    expect_refresh_error(scenario, "Geen bestaand kiosk-tabblad")
 
 
 def test_no_page_target() -> None:
     def scenario(module):
         module.find_presentation_target([{"type": "service_worker", "url": "https://docs.google.com/presentation/"}])
 
-    expect_refresh_error(scenario, "Geen bestaand Google Slides-tabblad")
+    expect_refresh_error(scenario, "Geen bestaand kiosk-tabblad")
 
 
 def test_prefers_google_slides_target() -> None:

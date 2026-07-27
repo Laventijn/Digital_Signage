@@ -5,9 +5,25 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_DIR="/opt/digitalsignage"
 CONFIG_FILE="/etc/digitalsignage/digitalsignage.conf"
 CONFIG_DEFAULTS=(
+  "CONTENT_MODE=\"presentation\""
+  "CONTENT_URL=\"\""
+  "SCREENSHOT_CACHE_ENABLED=true"
+  "SCREENSHOT_CACHE_REFRESH_SECONDS=900"
+  "SCREENSHOT_CAPTURE_WIDTH=1920"
+  "SCREENSHOT_CAPTURE_HEIGHT=1080"
+  "SCREENSHOT_CAPTURE_DEBUG_PORT=9333"
+  "SCREENSHOT_STABLE_GAP_MS=400"
+  "SCREENSHOT_TRANSITION_WAIT_MS=750"
+  "SCREENSHOT_MAX_SLIDES=100"
+  "SCREENSHOT_MAX_CAPTURE_SECONDS=900"
+  "SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS=15"
+  "SCREENSHOT_IMAGE_DIFFERENCE_PERCENT=2"
+  "SCREENSHOT_CACHE_KEEP_VERSIONS=2"
+  "OFFLINE_WATERMARK_TEXT=\"Offline modus\""
+  "WEBSITE_OFFLINE_CAPTURE_MODE=\"latest\""
   "REFRESH_SECONDS=300"
   "RESOURCE_LOG_RETENTION_DAYS=3"
-  "HEALTH_CHECK_SECONDS=60"
+  "HEALTH_CHECK_SECONDS=15"
   "HEALTH_FAILURE_THRESHOLD=3"
   "HEALTH_RESTART_COOLDOWN_SECONDS=600"
   "HEALTH_HTTP_TIMEOUT_SECONDS=5"
@@ -15,10 +31,10 @@ CONFIG_DEFAULTS=(
   "HEALTH_LOG_RETENTION_DAYS=3"
   "HEALTH_LOG_MAX_BYTES=5242880"
   "OFFLINE_PAGE_ENABLED=true"
-  "OFFLINE_AFTER_SECONDS=300"
+  "OFFLINE_AFTER_SECONDS=45"
   "ONLINE_CONFIRM_SECONDS=30"
   "CONNECTIVITY_CHECK_URL=\"https://clients3.google.com/generate_204\""
-  "CONNECTIVITY_TIMEOUT_SECONDS=8"
+  "CONNECTIVITY_TIMEOUT_SECONDS=5"
   "OFFLINE_PAGE_URL=\"file:///opt/digitalsignage/offline/index.html\""
   "DESKTOP_BACKGROUND_ENABLED=true"
   "DESKTOP_BACKGROUND_FILE=\"/opt/digitalsignage/assets/wallpapers/digitalsignage-background.png\""
@@ -93,6 +109,7 @@ fi
 KIOSK_USER="bloemkool"
 REFRESH_SECONDS="300"
 HEALTH_CHECK_SECONDS="60"
+SCREENSHOT_CACHE_REFRESH_SECONDS="900"
 append_missing_config_defaults "${CONFIG_FILE}"
 if [ -f "${CONFIG_FILE}" ]; then
   configured_kiosk_user="$(read_config_value KIOSK_USER "${CONFIG_FILE}")"
@@ -106,6 +123,10 @@ if [ -f "${CONFIG_FILE}" ]; then
   configured_health_seconds="$(read_config_value HEALTH_CHECK_SECONDS "${CONFIG_FILE}")"
   if [ -n "${configured_health_seconds}" ]; then
     HEALTH_CHECK_SECONDS="${configured_health_seconds}"
+  fi
+  configured_screenshot_seconds="$(read_config_value SCREENSHOT_CACHE_REFRESH_SECONDS "${CONFIG_FILE}")"
+  if [ -n "${configured_screenshot_seconds}" ]; then
+    SCREENSHOT_CACHE_REFRESH_SECONDS="${configured_screenshot_seconds}"
   fi
 fi
 
@@ -128,6 +149,10 @@ install_project_files() {
   install -m 0644 "${PROJECT_ROOT}/assets/offline/index.html" "${INSTALL_DIR}/offline/index.html"
   install -m 0644 "${PROJECT_ROOT}/assets/offline/offline.css" "${INSTALL_DIR}/offline/offline.css"
   cp -R "${PROJECT_ROOT}/web" "${INSTALL_DIR}/"
+  install -d -m 0755 "${INSTALL_DIR}/screenshot-player"
+  install -m 0644 "${PROJECT_ROOT}/assets/screenshot-player/index.html" "${INSTALL_DIR}/screenshot-player/index.html"
+  install -m 0644 "${PROJECT_ROOT}/assets/screenshot-player/player.css" "${INSTALL_DIR}/screenshot-player/player.css"
+  install -m 0644 "${PROJECT_ROOT}/assets/screenshot-player/player.js" "${INSTALL_DIR}/screenshot-player/player.js"
 }
 
 configure_desktop_background() {
@@ -148,6 +173,13 @@ health_interval() {
   case "${HEALTH_CHECK_SECONDS:-}" in
     ''|*[!0-9]*|0) printf '60' ;;
     *) printf '%s' "${HEALTH_CHECK_SECONDS}" ;;
+  esac
+}
+
+screenshot_interval() {
+  case "${SCREENSHOT_CACHE_REFRESH_SECONDS:-}" in
+    ''|*[!0-9]*|0) printf '900' ;;
+    *) printf '%s' "${SCREENSHOT_CACHE_REFRESH_SECONDS}" ;;
   esac
 }
 
@@ -183,6 +215,25 @@ OnUnitInactiveSec=${interval}s
 EOF
 }
 
+write_screenshot_timer() {
+  local timer_file="$1"
+  local interval
+  interval="$(screenshot_interval)"
+  cat > "${timer_file}" <<EOF
+[Unit]
+Description=Digital Signage periodieke screenshotcache
+
+[Timer]
+OnBootSec=${interval}s
+OnUnitInactiveSec=${interval}s
+AccuracySec=60s
+Unit=digitalsignage-screenshot-cache.service
+
+[Install]
+WantedBy=timers.target
+EOF
+}
+
 mkdir -p "${INSTALL_DIR}"
 install_project_files
 configure_desktop_background
@@ -209,15 +260,19 @@ else
   cp "${PROJECT_ROOT}/services/digitalsignage-resource-log.timer" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-health.service" "${user_unit_dir}/"
   cp "${PROJECT_ROOT}/services/digitalsignage-health.timer" "${user_unit_dir}/"
+  cp "${PROJECT_ROOT}/services/digitalsignage-screenshot-cache.service" "${user_unit_dir}/"
   write_refresh_timer "${user_unit_dir}/digitalsignage-refresh.timer"
   write_health_timer_dropin "${user_unit_dir}/digitalsignage-health.timer.d"
+  write_screenshot_timer "${user_unit_dir}/digitalsignage-screenshot-cache.timer"
   chown -R "${KIOSK_USER}:${user_group}" "${user_home}/.config"
 
   # Maak de gebruikersstatusmap voordat user-services opnieuw geladen of gestart
   # worden. Resource-logging en health-check schrijven hier hun state en logs;
   # deze stap herstelt oudere installaties en voorkomt status=226/NAMESPACE.
   user_state_dir="${user_home}/.local/state/digitalsignage"
+  user_cache_dir="${user_home}/.local/share/digitalsignage/screenshot-cache"
   install -d -m 0755 -o "${KIOSK_USER}" -g "${user_group}" "${user_state_dir}"
+  install -d -m 0755 -o "${KIOSK_USER}" -g "${user_group}" "${user_cache_dir}" "${user_cache_dir}/versions" "${user_cache_dir}/work"
 
   user_runtime="/run/user/${user_uid}"
   user_bus="${user_runtime}/bus"
@@ -229,6 +284,8 @@ else
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-resource-log.timer
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-health.timer
     runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user restart digitalsignage-health.timer
+    runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user enable --now digitalsignage-screenshot-cache.timer
+    runuser -u "${KIOSK_USER}" -- env XDG_RUNTIME_DIR="${user_runtime}" DBUS_SESSION_BUS_ADDRESS="unix:path=${user_bus}" systemctl --user restart digitalsignage-screenshot-cache.timer
   else
     echo "Geen actieve usersessie gevonden voor '${KIOSK_USER}'; user-services zijn bijgewerkt maar niet gestart."
     echo "Start na aanmelden als '${KIOSK_USER}':"
@@ -237,6 +294,7 @@ else
     echo "  systemctl --user enable --now digitalsignage-refresh.timer"
     echo "  systemctl --user enable --now digitalsignage-resource-log.timer"
     echo "  systemctl --user enable --now digitalsignage-health.timer"
+    echo "  systemctl --user enable --now digitalsignage-screenshot-cache.timer"
   fi
 fi
 
