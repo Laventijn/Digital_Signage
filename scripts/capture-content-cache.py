@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import errno
 import hashlib
 import json
 import os
@@ -84,6 +85,14 @@ class TransitionCrossed(CaptureError):
         self.difference_percent = difference_percent
 
 
+class TransitionOrBlankFrame(CaptureError):
+    """Een stabiliteitspaar bevat een bijna leeg overgangsbeeld."""
+
+    def __init__(self, difference_percent: float) -> None:
+        super().__init__(f"overgangsbeeld of leeg frame: verschil={difference_percent:.2f}%")
+        self.difference_percent = difference_percent
+
+
 class ActiveCaptureLock(CaptureError):
     """Er loopt al een opname; dit is een normale timer-uitkomst."""
 
@@ -107,6 +116,7 @@ class CaptureStats:
     change_poll_attempts: int = 0
     unstable_candidate_attempts: int = 0
     transition_crossed_attempts: int = 0
+    transition_or_blank_attempts: int = 0
     stability_debug_pairs: int = 0
     stable: int = 0
     rejected: int = 0
@@ -165,16 +175,21 @@ class DevTools:
         call_id = self.next_id
         self.next_id += 1
         self.connection.settimeout(timeout)
-        self.connection.send(json.dumps({"id": call_id, "method": method, "params": params or {}}))
-        while True:
-            check_cancelled()
-            response = json.loads(self.connection.recv())
-            if response.get("id") != call_id:
-                continue
-            if "error" in response:
-                raise CaptureError(f"Chromium DevTools fout bij {method}: {response['error']}")
-            result = response.get("result", {})
-            return result if isinstance(result, dict) else {}
+        try:
+            self.connection.send(json.dumps({"id": call_id, "method": method, "params": params or {}}))
+            while True:
+                check_cancelled()
+                response = json.loads(self.connection.recv())
+                if response.get("id") != call_id:
+                    continue
+                if "error" in response:
+                    raise CaptureError(f"Chromium DevTools fout bij {method}: {response['error']}")
+                result = response.get("result", {})
+                return result if isinstance(result, dict) else {}
+        except CaptureError:
+            raise
+        except Exception as exc:
+            raise CaptureError(f"Chromium DevTools call mislukt bij {method}: {exc.__class__.__name__}") from exc
 
 
 def check_cancelled() -> None:
@@ -288,6 +303,28 @@ def log_cleanup_warning(log_file: Path, config: Any, line: str) -> None:
         log_line(log_file, config, line)
     except Exception:
         pass
+
+
+def remove_work_root(work_root: Path, log_file: Path, config: Any) -> None:
+    for attempt in range(1, 6):
+        try:
+            shutil.rmtree(work_root, ignore_errors=False)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            retryable = exc.errno in {errno.ENOTEMPTY, errno.EBUSY, errno.EACCES} or isinstance(exc, PermissionError)
+            if retryable and attempt < 5:
+                time.sleep(0.2 * attempt)
+                continue
+            remaining: list[str] = []
+            try:
+                remaining = [str(path.relative_to(work_root)) for path in list(work_root.rglob("*"))[:10]]
+            except OSError:
+                remaining = []
+            remaining_note = ",".join(remaining) if remaining else "-"
+            log_cleanup_warning(log_file, config, f"mode={config.mode} cleanup_warning=workdir_remove_failed reason={str(exc).replace(' ', '_')} remaining={remaining_note}")
+            return
 
 
 def chromium_command(raw_config: dict[str, str], config: Any, browser_dir: Path) -> list[str]:
@@ -416,11 +453,20 @@ def current_url(devtools: DevTools, timeout: float = 5) -> str:
     return str(evaluate(devtools, "location.href", timeout=timeout) or "")
 
 
+def remember_devtools_state(devtools: Any, name: str, value: Any) -> None:
+    try:
+        setattr(devtools, name, value)
+    except Exception:
+        pass
+
+
 def read_slide_id_now(devtools: DevTools, timeout: float = 0.75) -> str:
     try:
+        remember_devtools_state(devtools, "last_slide_id_error", "")
         return slide_id_from_url(current_url(devtools, timeout=timeout)) or ""
     except Exception as exc:
-        raise CaptureError(f"cdp_call_timeout bij read_slide_id_now: {exc}") from exc
+        remember_devtools_state(devtools, "last_slide_id_error", exc.__class__.__name__)
+        return ""
 
 
 def runtime_diagnostics(devtools: DevTools) -> dict[str, Any]:
@@ -548,6 +594,33 @@ def image_brightness_class(data: bytes) -> str:
     return "normal"
 
 
+def image_pixel_stats(data: bytes) -> dict[str, float]:
+    _width, _height, pixels = png_rgb_pixels(data)
+    if not pixels:
+        return {"average": 0.0, "near_black_percent": 100.0, "variation": 0.0}
+    luminance_values: list[int] = []
+    near_black = 0
+    for offset in range(0, len(pixels), 3):
+        red = pixels[offset]
+        green = pixels[offset + 1]
+        blue = pixels[offset + 2]
+        luminance = round((red * 299 + green * 587 + blue * 114) / 1000)
+        luminance_values.append(luminance)
+        if red <= 18 and green <= 18 and blue <= 18:
+            near_black += 1
+    average = sum(luminance_values) / len(luminance_values)
+    return {
+        "average": average,
+        "near_black_percent": (near_black / len(luminance_values)) * 100,
+        "variation": float(max(luminance_values) - min(luminance_values)),
+    }
+
+
+def is_transition_or_blank_frame(data: bytes) -> bool:
+    stats = image_pixel_stats(data)
+    return stats["average"] < 35 and stats["near_black_percent"] >= 92 and stats["variation"] < 28
+
+
 def validate_png_size(data: bytes, width: int, height: int) -> None:
     actual_width, actual_height = png_dimensions(data)
     if actual_width != width or actual_height != height:
@@ -576,9 +649,12 @@ def set_viewport(devtools: DevTools, config: Any) -> None:
 
 
 def capture_png(devtools: DevTools, config: Any, watermark_text: str = "", timeout: float = 30) -> bytes:
+    total_start = time.monotonic()
+    timing: dict[str, float] = {}
     if watermark_text:
         evaluate(devtools, watermark_script(watermark_text), timeout=5)
     try:
+        cdp_start = time.monotonic()
         result = devtools.call(
             "Page.captureScreenshot",
             {
@@ -594,14 +670,25 @@ def capture_png(devtools: DevTools, config: Any, watermark_text: str = "", timeo
             },
             timeout=timeout,
         )
+        cdp_received_at = time.monotonic()
+        timing["cdp_capture_wait_ms"] = round((cdp_received_at - cdp_start) * 1000)
+        timing["cdp_received_at"] = cdp_received_at
     finally:
         if watermark_text:
             evaluate(devtools, remove_watermark_script(), timeout=5)
     data = result.get("data")
     if not isinstance(data, str) or not data:
         raise CaptureError("Chromium gaf geen screenshotdata terug")
+    decode_start = time.monotonic()
     png = base64.b64decode(data)
+    decode_end = time.monotonic()
+    timing["base64_decode_ms"] = round((decode_end - decode_start) * 1000)
+    png_decode_start = time.monotonic()
     validate_png_size(png, config.capture_width, config.capture_height)
+    png_decode_end = time.monotonic()
+    timing["png_decode_ms"] = round((png_decode_end - png_decode_start) * 1000)
+    timing["total_capture_ms"] = round((png_decode_end - total_start) * 1000)
+    remember_devtools_state(devtools, "last_capture_timing", timing)
     return png
 
 
@@ -614,14 +701,16 @@ def stability_debug_enabled(config: Any) -> bool:
     return bool(getattr(config, "stability_debug_enabled", False))
 
 
-def save_stability_debug_pair(debug_dir: Path | None, stats: CaptureStats, first: bytes, second: bytes) -> None:
+def save_stability_debug_pair(debug_dir: Path | None, stats: CaptureStats, first: bytes, second: bytes) -> int:
     if debug_dir is None or stats.stability_debug_pairs >= 5:
-        return
+        return 0
+    started = time.monotonic()
     stats.stability_debug_pairs += 1
     debug_dir.mkdir(parents=True, exist_ok=True)
     prefix = f"stability-{stats.stability_debug_pairs:03d}"
     (debug_dir / f"{prefix}-a.png").write_bytes(first)
     (debug_dir / f"{prefix}-b.png").write_bytes(second)
+    return round((time.monotonic() - started) * 1000)
 
 
 def log_stability_pair(
@@ -646,8 +735,12 @@ def log_stability_pair(
     diff: float,
     phase: str,
     devtools: DevTools,
+    capture_a_timing: dict[str, float] | None = None,
+    capture_b_timing: dict[str, float] | None = None,
+    debug_write_ms: int = 0,
 ) -> None:
-    if stats.unstable_candidate_attempts + stats.transition_crossed_attempts > 5 and (stats.unstable_candidate_attempts + stats.transition_crossed_attempts) % 10 != 0:
+    rejected_attempts = stats.unstable_candidate_attempts + stats.transition_crossed_attempts + stats.transition_or_blank_attempts
+    if rejected_attempts > 5 and rejected_attempts % 10 != 0:
         return
     width_a, height_a = png_dimensions(first)
     width_b, height_b = png_dimensions(second)
@@ -659,6 +752,8 @@ def log_stability_pair(
         "capture_b": round((screenshot_b_received_at - screenshot_b_start_at) * 1000),
     }
     slow_operations = ",".join(f"{name}:{duration}" for name, duration in durations.items() if duration > 1000)
+    capture_a_timing = capture_a_timing or {}
+    capture_b_timing = capture_b_timing or {}
     log_line(
         log_file,
         config,
@@ -679,6 +774,15 @@ def log_stability_pair(
             f"actual_sleep_ms={round((stable_sleep_end_at - stable_sleep_start_at) * 1000)}",
             f"capture_a_duration_ms={durations['capture_a']}",
             f"capture_b_duration_ms={durations['capture_b']}",
+            f"cdp_capture_wait_ms_a={round(capture_a_timing.get('cdp_capture_wait_ms', -1))}",
+            f"cdp_capture_wait_ms_b={round(capture_b_timing.get('cdp_capture_wait_ms', -1))}",
+            f"base64_decode_ms_a={round(capture_a_timing.get('base64_decode_ms', -1))}",
+            f"base64_decode_ms_b={round(capture_b_timing.get('base64_decode_ms', -1))}",
+            f"png_decode_ms_a={round(capture_a_timing.get('png_decode_ms', -1))}",
+            f"png_decode_ms_b={round(capture_b_timing.get('png_decode_ms', -1))}",
+            f"debug_write_ms={debug_write_ms}",
+            f"total_capture_ms_a={round(capture_a_timing.get('total_capture_ms', -1))}",
+            f"total_capture_ms_b={round(capture_b_timing.get('total_capture_ms', -1))}",
             f"actual_stable_gap_ms={round((screenshot_b_start_at - screenshot_a_received_at) * 1000)}",
             f"complete_attempt_duration_ms={round((screenshot_b_received_at - attempt_started_at) * 1000)}",
             f"slow_operation={slow_operations or '-'}",
@@ -703,7 +807,8 @@ def stable_raw_capture(devtools: DevTools, config: Any, deadline: Deadline, dela
     slide_id_a_end_at = time.monotonic()
     screenshot_a_start_at = time.monotonic()
     first = capture_png(devtools, config, timeout=min(5.0, max(0.2, deadline.remaining())))
-    screenshot_a_received_at = time.monotonic()
+    capture_a_timing = dict(getattr(devtools, "last_capture_timing", {}))
+    screenshot_a_received_at = float(capture_a_timing.get("cdp_received_at", time.monotonic()))
     stable_sleep_start_at = time.monotonic()
     deadline_sleep(effective_stable_gap_seconds(config, delay_ms), deadline)
     stable_sleep_end_at = time.monotonic()
@@ -712,19 +817,29 @@ def stable_raw_capture(devtools: DevTools, config: Any, deadline: Deadline, dela
     slide_id_b_end_at = time.monotonic()
     screenshot_b_start_at = time.monotonic()
     second = capture_png(devtools, config, timeout=min(5.0, max(0.2, deadline.remaining())))
-    screenshot_b_received_at = time.monotonic()
+    capture_b_timing = dict(getattr(devtools, "last_capture_timing", {}))
+    screenshot_b_received_at = float(capture_b_timing.get("cdp_received_at", time.monotonic()))
     diff = image_difference_percent(first, second)
-    if slide_id_a and slide_id_b and slide_id_a != slide_id_b:
+    if is_transition_or_blank_frame(first) or is_transition_or_blank_frame(second):
+        debug_write_ms = 0
         if stats is not None:
-            save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, first, second)
+            debug_write_ms = save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, first, second)
         if log_file is not None and stats is not None:
-            log_stability_pair(log_file, config, stats, first, second, slide_id_a, slide_id_b, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, diff, "transition_crossed", devtools)
+            log_stability_pair(log_file, config, stats, first, second, slide_id_a, slide_id_b, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, diff, "transition_or_blank_frame", devtools, capture_a_timing, capture_b_timing, debug_write_ms)
+        raise TransitionOrBlankFrame(diff)
+    if slide_id_a and slide_id_b and slide_id_a != slide_id_b:
+        debug_write_ms = 0
+        if stats is not None:
+            debug_write_ms = save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, first, second)
+        if log_file is not None and stats is not None:
+            log_stability_pair(log_file, config, stats, first, second, slide_id_a, slide_id_b, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, diff, "transition_crossed", devtools, capture_a_timing, capture_b_timing, debug_write_ms)
         raise TransitionCrossed(diff)
     if diff > config.image_difference_percent:
+        debug_write_ms = 0
         if stats is not None:
-            save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, first, second)
+            debug_write_ms = save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, first, second)
         if log_file is not None and stats is not None:
-            log_stability_pair(log_file, config, stats, first, second, slide_id_a, slide_id_b, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, diff, "unstable_candidate", devtools)
+            log_stability_pair(log_file, config, stats, first, second, slide_id_a, slide_id_b, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, diff, "unstable_candidate", devtools, capture_a_timing, capture_b_timing, debug_write_ms)
         raise UnstableCandidate(diff)
     return StableCandidate(second, image_hash(second), slide_id_b, diff)
 
@@ -921,12 +1036,12 @@ def log_rejected(log_file: Path, config: Any, stats: CaptureStats, reason: str, 
                 f"stability_difference={round(diff, 2) if reason == 'unstable_candidate' else '-'}",
                 f"dimensions={candidate_dimensions(candidate)}",
                 f"phase={phase.replace(' ', '_')}",
-                "candidate=unstable" if reason == "unstable_candidate" else "candidate=rejected",
+                "candidate=unstable" if reason == "unstable_candidate" else "candidate=transition_or_blank" if reason == "transition_or_blank_frame" else "candidate=rejected",
                 f"reason={reason.replace(' ', '_')}",
             ]),
         )
     if technical_failure and stats.consecutive_failures >= config.max_consecutive_failures:
-        stats.stop_reason = "consecutive_failures"
+        stats.stop_reason = "technical_failures"
         raise CaptureError("te veel opeenvolgende mislukte stable-capture-pogingen")
 
 
@@ -970,7 +1085,8 @@ def wait_for_rendered_slide_change(devtools: DevTools, config: Any, previous: St
         attempt_started_at = time.monotonic()
         screenshot_a_start_at = time.monotonic()
         png = capture_png(devtools, config, timeout=min(5.0, max(0.2, deadline.remaining())))
-        screenshot_a_received_at = time.monotonic()
+        capture_a_timing = dict(getattr(devtools, "last_capture_timing", {}))
+        screenshot_a_received_at = float(capture_a_timing.get("cdp_received_at", time.monotonic()))
         record_slide_id(stats, slide_id)
         raw_diff = image_difference_percent(previous.raw_png, png)
         if raw_diff <= config.image_difference_percent:
@@ -986,19 +1102,27 @@ def wait_for_rendered_slide_change(devtools: DevTools, config: Any, previous: St
         slide_id_b_end_at = time.monotonic()
         screenshot_b_start_at = time.monotonic()
         second = capture_png(devtools, config, timeout=min(5.0, max(0.2, deadline.remaining())))
-        screenshot_b_received_at = time.monotonic()
+        capture_b_timing = dict(getattr(devtools, "last_capture_timing", {}))
+        screenshot_b_received_at = float(capture_b_timing.get("cdp_received_at", time.monotonic()))
         record_slide_id(stats, second_slide_id)
         stability_diff = image_difference_percent(png, second)
+        if is_transition_or_blank_frame(png) or is_transition_or_blank_frame(second):
+            stats.transition_or_blank_attempts += 1
+            debug_write_ms = save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, png, second)
+            log_stability_pair(log_file, config, stats, png, second, slide_id, second_slide_id, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, stability_diff, "transition_or_blank_frame", devtools, capture_a_timing, capture_b_timing, debug_write_ms)
+            log_rejected(log_file, config, stats, "transition_or_blank_frame", StableCandidate(second, image_hash(second), second_slide_id, stability_diff), previous, started)
+            deadline_sleep(max(0.2, config.change_poll_ms / 1000), deadline)
+            continue
         if slide_id and second_slide_id and slide_id != second_slide_id:
             stats.transition_crossed_attempts += 1
-            save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, png, second)
-            log_stability_pair(log_file, config, stats, png, second, slide_id, second_slide_id, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, stability_diff, "transition_crossed", devtools)
+            debug_write_ms = save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, png, second)
+            log_stability_pair(log_file, config, stats, png, second, slide_id, second_slide_id, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, stability_diff, "transition_crossed", devtools, capture_a_timing, capture_b_timing, debug_write_ms)
             deadline_sleep(max(0.2, config.change_poll_ms / 1000), deadline)
             continue
         if stability_diff > config.image_difference_percent:
             stats.unstable_candidate_attempts += 1
-            save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, png, second)
-            log_stability_pair(log_file, config, stats, png, second, slide_id, second_slide_id, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, stability_diff, "unstable_candidate", devtools)
+            debug_write_ms = save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, png, second)
+            log_stability_pair(log_file, config, stats, png, second, slide_id, second_slide_id, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, stability_diff, "unstable_candidate", devtools, capture_a_timing, capture_b_timing, debug_write_ms)
             log_rejected(log_file, config, stats, "unstable_candidate", StableCandidate(second, image_hash(second), second_slide_id, stability_diff), previous, started)
             deadline_sleep(max(0.2, config.change_poll_ms / 1000), deadline)
             continue
@@ -1024,6 +1148,10 @@ def first_stable_raw_capture(devtools: DevTools, config: Any, deadline: Deadline
             stats.transition_crossed_attempts += 1
             log_rejected(log_file, config, stats, "transition_crossed", StableCandidate(b"", "", "", exc.difference_percent), None, started)
             deadline_sleep(config.change_poll_ms / 1000, deadline)
+        except TransitionOrBlankFrame as exc:
+            stats.transition_or_blank_attempts += 1
+            log_rejected(log_file, config, stats, "transition_or_blank_frame", StableCandidate(b"", "", "", exc.difference_percent), None, started)
+            deadline_sleep(config.change_poll_ms / 1000, deadline)
         except CaptureError as exc:
             if isinstance(exc, CaptureCancelled):
                 raise
@@ -1042,9 +1170,8 @@ def wait_for_visual_change(devtools: DevTools, config: Any, previous: StableCand
         slide_id = ""
         try:
             png = capture_png(devtools, config, timeout=min(5.0, max(0.2, deadline.remaining())))
-            url = current_url(devtools)
             diff = image_difference_percent(previous.raw_png, png)
-            slide_id = slide_id_from_url(url) or ""
+            slide_id = read_slide_id_now(devtools)
             record_slide_id(stats, slide_id)
             id_changed = bool(slide_id and previous.slide_id and slide_id != previous.slide_id)
             if id_changed:
@@ -1069,6 +1196,11 @@ def wait_for_visual_change(devtools: DevTools, config: Any, previous: StableCand
         except TransitionCrossed as exc:
             stats.transition_crossed_attempts += 1
             log_rejected(log_file, config, stats, "transition_crossed", StableCandidate(b"", "", slide_id, exc.difference_percent), previous, started)
+            deadline_sleep(max(0.2, config.change_poll_ms / 1000), deadline)
+            continue
+        except TransitionOrBlankFrame as exc:
+            stats.transition_or_blank_attempts += 1
+            log_rejected(log_file, config, stats, "transition_or_blank_frame", StableCandidate(b"", "", slide_id, exc.difference_percent), previous, started)
             deadline_sleep(max(0.2, config.change_poll_ms / 1000), deadline)
             continue
         except CaptureError as exc:
@@ -1202,6 +1334,7 @@ def capture_presentation(devtools: DevTools, config: Any, version_dir: Path, dea
         "change_poll_attempts": stats.change_poll_attempts,
         "unstable_candidate_attempts": stats.unstable_candidate_attempts,
         "transition_crossed_attempts": stats.transition_crossed_attempts,
+        "transition_or_blank_attempts": stats.transition_or_blank_attempts,
         "accepted_slides": stats.stable,
         "rejected_attempts": stats.rejected,
         "stop_reason": stats.stop_reason,
@@ -1278,6 +1411,7 @@ def run_capture(args: argparse.Namespace) -> int:
                 f"change_poll_attempts={stats.change_poll_attempts}",
                 f"unstable_candidate_attempts={stats.unstable_candidate_attempts}",
                 f"transition_crossed_attempts={stats.transition_crossed_attempts}",
+                f"transition_or_blank_attempts={stats.transition_or_blank_attempts}",
                 f"accepted_slides={stats.stable}",
                 f"stable={stats.stable}",
                 f"rejected={stats.rejected}",
@@ -1301,11 +1435,11 @@ def run_capture(args: argparse.Namespace) -> int:
         return 0
     except CaptureError as exc:
         if stats.stop_reason == "":
-            stats.stop_reason = "failed"
+            stats.stop_reason = "capture_incomplete"
         reason = "maximum_duration_reached" if "maximum captureduur" in str(exc) else str(exc).replace(" ", "_")
         log_line(log_file, config, f"mode={config.mode} cache=preserved reason={reason} stop_reason={stats.stop_reason} duration={round(time.monotonic() - started, 1)}")
         print(f"Fout: {exc}", file=sys.stderr)
-        return 1
+        return 0
     except Exception as exc:
         if stats.stop_reason == "":
             stats.stop_reason = "failed"
@@ -1322,12 +1456,7 @@ def run_capture(args: argparse.Namespace) -> int:
         if process is not None:
             stop_chromium(process)
         if work_root is not None:
-            try:
-                shutil.rmtree(work_root, ignore_errors=False)
-            except FileNotFoundError:
-                pass
-            except OSError as exc:
-                log_cleanup_warning(log_file, config, f"mode={config.mode} cleanup_warning=workdir_remove_failed reason={str(exc).replace(' ', '_')}")
+            remove_work_root(work_root, log_file, config)
         release_lock(lock_fd, state_dir)
 
 

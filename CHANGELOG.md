@@ -14,6 +14,7 @@ Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 - Slide-ID-wijzigingen wachten nu op een werkelijk nieuw raw frame; onbetrouwbare 1-slidepublicatie wordt geweigerd wanneer meerdere slide-ID's gezien zijn.
 - Screenshotstabiliteit vergelijkt gedecodeerde RGB-pixels en kan tijdelijk begrensde A/B-debugbeelden bewaren met `SCREENSHOT_DEBUG_STABILITY=true`.
 - A/B-stabiliteitsmetingen nemen geen lange URL- of renderwachten meer tussen screenshot A en B op en loggen afzonderlijke timingvelden.
+- Tijdelijke CDP-timeouts bij slide-ID-lezen blijven begrensde kandidaten met onbekende slide-ID, bijna lege donkere overgangsframes worden apart geweigerd en cleanup probeert `Directory not empty` kort opnieuw.
 - Documentatie toegevoegd in `docs/21-screenshot-cache.md`.
 
 ## 0.1.0

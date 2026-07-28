@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import importlib.util
+import base64
+import errno
 import json
 import os
 import struct
@@ -93,6 +95,22 @@ def png_one_pixel_changed(width: int, height: int) -> bytes:
         if y == 0:
             pixels[0:3] = bytes((255, 255, 255))
         rows.append(b"\x00" + bytes(pixels))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + png_chunk(b"IDAT", zlib.compress(b"".join(rows), 6))
+        + png_chunk(b"IEND", b"")
+    )
+
+
+def png_dark_varied(width: int, height: int) -> bytes:
+    rows = []
+    for y in range(height):
+        row = bytearray()
+        for x in range(width):
+            value = 6 if (x + y) % 2 == 0 else 52
+            row.extend((value, value, value))
+        rows.append(b"\x00" + bytes(row))
     return (
         b"\x89PNG\r\n\x1a\n"
         + png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
@@ -212,7 +230,7 @@ class ScreenshotCacheTests(unittest.TestCase):
             with self.assertRaises(capture.CaptureError):
                 capture.log_rejected(log_file, DummyConfig(), stats, "DevTools fout", None, None, time.monotonic(), technical_failure=True)
         self.assertEqual(stats.consecutive_failures, 2)
-        self.assertEqual(stats.stop_reason, "consecutive_failures")
+        self.assertEqual(stats.stop_reason, "technical_failures")
 
     def test_screenshot_timer_resets_old_intervals(self):
         install_text = (ROOT_DIR / "install" / "install.sh").read_text(encoding="utf-8")
@@ -326,6 +344,95 @@ class ScreenshotCacheTests(unittest.TestCase):
 
         self.assertEqual(candidate.slide_id, "id.B")
         self.assertEqual(events, ["sleep:0.8", "read_id", "capture", "sleep:0.4", "read_id", "capture"])
+
+    def test_read_slide_id_timeout_is_unknown_and_capture_continues(self):
+        class FakeDevTools:
+            def call(self, _method, _params=None, timeout=10):
+                raise TimeoutError("Connection timed out")
+
+        self.assertEqual(capture.read_slide_id_now(FakeDevTools()), "")
+
+        with mock.patch.object(capture, "deadline_sleep"), \
+                mock.patch.object(capture, "capture_png", side_effect=[png_bytes(b"B"), png_bytes(b"B")]):
+            candidate = capture.stable_raw_capture(
+                FakeDevTools(),
+                StableGap400Config(),
+                capture.Deadline(30),
+                5000,
+            )
+
+        self.assertEqual(candidate.slide_id, "")
+        self.assertEqual(candidate.difference_percent, 0)
+
+    def test_dark_transition_frame_is_rejected_before_stability_acceptance(self):
+        stats = capture.CaptureStats(attempts=1)
+
+        with mock.patch.object(capture, "deadline_sleep"), \
+                mock.patch.object(capture, "read_slide_id_now", return_value="id.B"), \
+                mock.patch.object(capture, "capture_png", side_effect=[png_solid(64, 36, (0, 0, 0)), png_bytes(b"B")]):
+            with self.assertRaises(capture.TransitionOrBlankFrame):
+                capture.stable_raw_capture(
+                    object(),
+                    StableGap400Config(),
+                    capture.Deadline(30),
+                    5000,
+                    stats=stats,
+                )
+
+    def test_legitimate_dark_varied_slide_can_be_accepted(self):
+        dark_slide = png_dark_varied(64, 36)
+
+        with mock.patch.object(capture, "deadline_sleep"), \
+                mock.patch.object(capture, "read_slide_id_now", return_value="id.dark"), \
+                mock.patch.object(capture, "capture_png", side_effect=[dark_slide, dark_slide]):
+            candidate = capture.stable_raw_capture(
+                object(),
+                StableGap400Config(),
+                capture.Deadline(30),
+                5000,
+            )
+
+        self.assertEqual(candidate.slide_id, "id.dark")
+        self.assertEqual(candidate.difference_percent, 0)
+
+    def test_capture_png_records_cdp_and_decode_timing(self):
+        encoded = base64.b64encode(png_solid(DummyConfig.capture_width, DummyConfig.capture_height, (10, 20, 30))).decode("ascii")
+
+        class FakeDevTools:
+            def call(self, _method, _params=None, timeout=10):
+                return {"data": encoded}
+
+        devtools = FakeDevTools()
+        png = capture.capture_png(devtools, DummyConfig())
+
+        self.assertTrue(png.startswith(b"\x89PNG"))
+        timing = getattr(devtools, "last_capture_timing")
+        self.assertIn("cdp_capture_wait_ms", timing)
+        self.assertIn("base64_decode_ms", timing)
+        self.assertIn("png_decode_ms", timing)
+        self.assertIn("total_capture_ms", timing)
+        self.assertIn("cdp_received_at", timing)
+
+    def test_remove_work_root_retries_directory_not_empty_without_warning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work_root = Path(tmp) / "work"
+            work_root.mkdir()
+            config = DummyConfig()
+            log_file = Path(tmp) / "capture.log"
+            calls = []
+
+            def fake_rmtree(path, ignore_errors=False):
+                calls.append((path, ignore_errors))
+                if len(calls) == 1:
+                    raise OSError(errno.ENOTEMPTY, "Directory not empty")
+
+            with mock.patch.object(capture.shutil, "rmtree", side_effect=fake_rmtree), \
+                    mock.patch.object(capture.time, "sleep"), \
+                    mock.patch.object(capture, "log_cleanup_warning") as warn:
+                capture.remove_work_root(work_root, log_file, config)
+
+        self.assertEqual(len(calls), 2)
+        warn.assert_not_called()
 
     def test_presentation_round_accepts_three_delayed_slide_changes(self):
         first = capture.StableCandidate(png_bytes(b"A"), capture.image_hash(png_bytes(b"A")), "id.A", 0)
@@ -472,6 +579,38 @@ class ScreenshotCacheTests(unittest.TestCase):
             with self.assertRaises(capture.CaptureError):
                 capture.publish_version(cache_root, bad_version, DummyConfig(), {}, ["bad"])
             self.assertEqual((current_version / "images" / "slide-001.png").read_bytes(), b"old")
+
+    def test_controlled_capture_error_preserves_cache_without_failed_exit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = DummyConfig()
+            config.warnings = []
+            config.screenshot_cache_enabled = True
+            config.max_capture_seconds = 30
+            config.capture_debug_port = 9333
+            args = mock.Mock(
+                config_file=Path(tmp) / "config",
+                home="",
+                cache_root=str(Path(tmp) / "cache"),
+                state_dir=str(Path(tmp) / "state"),
+            )
+            work_root = Path(tmp) / "cache" / "work" / "capture-demo"
+
+            with mock.patch.object(capture, "read_config", return_value={}), \
+                    mock.patch.object(capture, "build_content_config", return_value=config), \
+                    mock.patch.object(capture, "acquire_lock", return_value=(None, False)), \
+                    mock.patch.object(capture, "safe_work_dir", return_value=work_root), \
+                    mock.patch.object(capture, "cleanup_stale_work", return_value=0), \
+                    mock.patch.object(capture, "start_chromium", return_value=object()), \
+                    mock.patch.object(capture, "wait_for_target", return_value={"webSocketDebuggerUrl": "ws://example", "id": "target"}), \
+                    mock.patch.object(capture, "DevTools", return_value=mock.Mock()), \
+                    mock.patch.object(capture, "set_viewport"), \
+                    mock.patch.object(capture, "capture_presentation", side_effect=capture.CaptureError("maximum captureduur bereikt")), \
+                    mock.patch.object(capture, "stop_chromium"), \
+                    mock.patch.object(capture, "remove_work_root"), \
+                    mock.patch.object(capture, "release_lock"):
+                exit_code = capture.run_capture(args)
+
+            self.assertEqual(exit_code, 0)
 
     @unittest.skipIf(os.name == "nt", "POSIX-lockcleanup wordt op de Pi getest")
     def test_lock_active_stale_and_cleanup(self):

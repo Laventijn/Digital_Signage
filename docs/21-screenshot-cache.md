@@ -66,7 +66,7 @@ Gebruik `Ctrl+C` niet als stopmechanisme voor een lopende user-service. Stop een
 systemctl --user stop digitalsignage-screenshot-cache.service
 ```
 
-Bij zo'n bewuste annulering ruimt het script de tijdelijke werkmap, het lockbestand en het eigen headless Chromium-proces op. De bestaande actieve cache blijft behouden.
+Bij zo'n bewuste annulering ruimt het script de tijdelijke werkmap, het lockbestand en het eigen headless Chromium-proces op. De bestaande actieve cache blijft behouden. Als Chromium nog kort bestanden vasthoudt, probeert de cleanup de werkmap begrensd opnieuw te verwijderen; een al verdwenen werkmap wordt niet als waarschuwing gelogd.
 
 Voor een Pi-hertest zonder timerinterferentie:
 
@@ -80,7 +80,7 @@ systemctl --user list-timers digitalsignage-screenshot-cache.timer
 systemctl --user start digitalsignage-screenshot-cache.timer
 ```
 
-Een melding `active_capture_lock` betekent dat er al een opname loopt. De service start dan geen tweede Chromium en eindigt normaal. Bij instabiele dia-overgangen staan de eerste diagnostische pogingen in `screenshot-cache.log` met `candidate=unstable`; dat is geen technische fout en bewaart de bestaande cache tot er een stabiele dia is.
+Een melding `active_capture_lock` betekent dat er al een opname loopt. De service start dan geen tweede Chromium en eindigt normaal. Bij instabiele dia-overgangen staan de eerste diagnostische pogingen in `screenshot-cache.log` met `candidate=unstable`; dat is geen technische fout en bewaart de bestaande cache tot er een stabiele dia is. Tijdelijke DevTools-timeouts bij het lezen van de slide-ID worden als onbekende slide-ID behandeld en mogen geen rauwe `Connection timed out` als eindreden geven. Een bijna leeg donker overgangsbeeld wordt apart gelogd met `phase=transition_or_blank_frame` en `candidate=transition_or_blank`.
 
 Wanneer Google Slides de `slide=`-URL al wijzigt maar Chromium nog het vorige beeld teruggeeft, wacht de capture op een werkelijk veranderde raw screenshot voordat een nieuwe dia stabiel kan worden geaccepteerd. Zodra meerdere niet-lege slide-ID's gezien zijn, wordt een 1-slidecache niet meer als `single_slide_confirmed` gepubliceerd; bij een onvolledige ronde blijft de bestaande cache behouden.
 
@@ -92,7 +92,7 @@ SCREENSHOT_DEBUG_STABILITY=true
 
 Zet deze waarde na de test opnieuw op `false`. Bij mislukte stabiliteitsparen bewaart de lopende opname maximaal vijf paren onder de tijdelijke werkmap `~/.local/share/digitalsignage/screenshot-cache/work/capture-*/debug/`, bijvoorbeeld `stability-001-a.png` en `stability-001-b.png`. Deze beelden worden niet naar `versions/current` gepubliceerd en verdwijnen bij normale cleanup.
 
-Een stabiliteitspaar wordt als korte A/B-operatie genomen: slide-ID A lezen, screenshot A nemen, alleen de ingestelde stable gap wachten, slide-ID B lezen en screenshot B nemen. De log vermeldt onder meer `configured_stable_gap_ms`, `actual_sleep_ms`, `actual_stable_gap_ms`, `capture_a_duration_ms`, `capture_b_duration_ms` en eventuele `slow_operation`.
+Een stabiliteitspaar wordt als korte A/B-operatie genomen: slide-ID A lezen, screenshot A nemen, alleen de ingestelde stable gap wachten, slide-ID B lezen en screenshot B nemen. De log vermeldt onder meer `configured_stable_gap_ms`, `actual_sleep_ms`, `actual_stable_gap_ms`, `capture_a_duration_ms`, `capture_b_duration_ms` en eventuele `slow_operation`. Voor trage screenshots staan daarnaast per A/B-screenshot aparte velden voor `cdp_capture_wait_ms`, `base64_decode_ms`, `png_decode_ms`, `debug_write_ms` en `total_capture_ms`.
 
 ## Pi-controle: refresh start geen capture
 
