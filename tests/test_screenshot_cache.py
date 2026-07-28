@@ -67,6 +67,10 @@ class DummyConfig:
     stability_debug_enabled = False
 
 
+class StableGap400Config(DummyConfig):
+    stable_gap_ms = 400
+
+
 def png_chunk(kind: bytes, payload: bytes) -> bytes:
     return len(payload).to_bytes(4, "big") + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
 
@@ -260,7 +264,7 @@ class ScreenshotCacheTests(unittest.TestCase):
         def fake_sleep(seconds, _deadline):
             events.append(f"sleep:{round(seconds, 1)}")
 
-        def fake_capture(_devtools, _config):
+        def fake_capture(_devtools, _config, **_kwargs):
             events.append("capture")
             return captures.pop(0)
 
@@ -295,6 +299,33 @@ class ScreenshotCacheTests(unittest.TestCase):
         self.assertEqual(stats.transition_crossed_attempts, 1)
         self.assertEqual(stats.unstable_candidate_attempts, 0)
         self.assertIn("sleep:1.0", events)
+
+    def test_stability_pair_uses_only_configured_gap_between_a_and_b(self):
+        events: list[str] = []
+
+        def fake_sleep(seconds, _deadline):
+            events.append(f"sleep:{round(seconds, 1)}")
+
+        def fake_capture(_devtools, _config, **_kwargs):
+            events.append("capture")
+            return png_bytes(b"B")
+
+        def fake_read(_devtools):
+            events.append("read_id")
+            return "id.B"
+
+        with mock.patch.object(capture, "deadline_sleep", side_effect=fake_sleep), \
+                mock.patch.object(capture, "capture_png", side_effect=fake_capture), \
+                mock.patch.object(capture, "read_slide_id_now", side_effect=fake_read):
+            candidate = capture.stable_raw_capture(
+                object(),
+                StableGap400Config(),
+                capture.Deadline(30),
+                5000,
+            )
+
+        self.assertEqual(candidate.slide_id, "id.B")
+        self.assertEqual(events, ["sleep:0.8", "read_id", "capture", "sleep:0.4", "read_id", "capture"])
 
     def test_presentation_round_accepts_three_delayed_slide_changes(self):
         first = capture.StableCandidate(png_bytes(b"A"), capture.image_hash(png_bytes(b"A")), "id.A", 0)

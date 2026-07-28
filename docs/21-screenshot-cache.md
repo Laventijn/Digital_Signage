@@ -92,6 +92,8 @@ SCREENSHOT_DEBUG_STABILITY=true
 
 Zet deze waarde na de test opnieuw op `false`. Bij mislukte stabiliteitsparen bewaart de lopende opname maximaal vijf paren onder de tijdelijke werkmap `~/.local/share/digitalsignage/screenshot-cache/work/capture-*/debug/`, bijvoorbeeld `stability-001-a.png` en `stability-001-b.png`. Deze beelden worden niet naar `versions/current` gepubliceerd en verdwijnen bij normale cleanup.
 
+Een stabiliteitspaar wordt als korte A/B-operatie genomen: slide-ID A lezen, screenshot A nemen, alleen de ingestelde stable gap wachten, slide-ID B lezen en screenshot B nemen. De log vermeldt onder meer `configured_stable_gap_ms`, `actual_sleep_ms`, `actual_stable_gap_ms`, `capture_a_duration_ms`, `capture_b_duration_ms` en eventuele `slow_operation`.
+
 ## Pi-controle: refresh start geen capture
 
 Met deze controle bewijs je dat de gewone refreshtimer actief blijft zonder screenshotcapture te starten:

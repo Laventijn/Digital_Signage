@@ -160,7 +160,7 @@ class DevTools:
     def close(self) -> None:
         self.connection.close()
 
-    def call(self, method: str, params: dict[str, Any] | None = None, timeout: int = 10) -> dict[str, Any]:
+    def call(self, method: str, params: dict[str, Any] | None = None, timeout: float = 10) -> dict[str, Any]:
         check_cancelled()
         call_id = self.next_id
         self.next_id += 1
@@ -394,7 +394,7 @@ def remove_watermark_script() -> str:
     return f"(() => {{ const e = document.getElementById({js_string(WATERMARK_ELEMENT_ID)}); if (e) e.remove(); }})();"
 
 
-def evaluate(devtools: DevTools, expression: str, timeout: int = 10) -> Any:
+def evaluate(devtools: DevTools, expression: str, timeout: float = 10) -> Any:
     result = devtools.call(
         "Runtime.evaluate",
         {"expression": expression, "returnByValue": True, "awaitPromise": True},
@@ -412,8 +412,15 @@ def wait_ready(devtools: DevTools, deadline: Deadline) -> None:
     raise CaptureError("pagina werd niet tijdig geladen")
 
 
-def current_url(devtools: DevTools) -> str:
-    return str(evaluate(devtools, "location.href", timeout=5) or "")
+def current_url(devtools: DevTools, timeout: float = 5) -> str:
+    return str(evaluate(devtools, "location.href", timeout=timeout) or "")
+
+
+def read_slide_id_now(devtools: DevTools, timeout: float = 0.75) -> str:
+    try:
+        return slide_id_from_url(current_url(devtools, timeout=timeout)) or ""
+    except Exception as exc:
+        raise CaptureError(f"cdp_call_timeout bij read_slide_id_now: {exc}") from exc
 
 
 def runtime_diagnostics(devtools: DevTools) -> dict[str, Any]:
@@ -568,7 +575,7 @@ def set_viewport(devtools: DevTools, config: Any) -> None:
         raise CaptureError(f"Chromium viewport wijkt af: verwacht={config.capture_width}x{config.capture_height} werkelijk={width}x{height}")
 
 
-def capture_png(devtools: DevTools, config: Any, watermark_text: str = "") -> bytes:
+def capture_png(devtools: DevTools, config: Any, watermark_text: str = "", timeout: float = 30) -> bytes:
     if watermark_text:
         evaluate(devtools, watermark_script(watermark_text), timeout=5)
     try:
@@ -585,7 +592,7 @@ def capture_png(devtools: DevTools, config: Any, watermark_text: str = "") -> by
                     "scale": 1,
                 },
             },
-            timeout=30,
+            timeout=timeout,
         )
     finally:
         if watermark_text:
@@ -617,11 +624,41 @@ def save_stability_debug_pair(debug_dir: Path | None, stats: CaptureStats, first
     (debug_dir / f"{prefix}-b.png").write_bytes(second)
 
 
-def log_stability_pair(log_file: Path, config: Any, stats: CaptureStats, first: bytes, second: bytes, slide_id_a: str, slide_id_b: str, captured_a_at: float, captured_b_at: float, attempt_started_at: float, diff: float, phase: str, devtools: DevTools) -> None:
+def log_stability_pair(
+    log_file: Path,
+    config: Any,
+    stats: CaptureStats,
+    first: bytes,
+    second: bytes,
+    slide_id_a: str,
+    slide_id_b: str,
+    slide_id_a_start_at: float,
+    slide_id_a_end_at: float,
+    screenshot_a_start_at: float,
+    screenshot_a_received_at: float,
+    stable_sleep_start_at: float,
+    stable_sleep_end_at: float,
+    slide_id_b_start_at: float,
+    slide_id_b_end_at: float,
+    screenshot_b_start_at: float,
+    screenshot_b_received_at: float,
+    attempt_started_at: float,
+    diff: float,
+    phase: str,
+    devtools: DevTools,
+) -> None:
     if stats.unstable_candidate_attempts + stats.transition_crossed_attempts > 5 and (stats.unstable_candidate_attempts + stats.transition_crossed_attempts) % 10 != 0:
         return
     width_a, height_a = png_dimensions(first)
     width_b, height_b = png_dimensions(second)
+    durations = {
+        "read_slide_id_a": round((slide_id_a_end_at - slide_id_a_start_at) * 1000),
+        "capture_a": round((screenshot_a_received_at - screenshot_a_start_at) * 1000),
+        "stable_sleep": round((stable_sleep_end_at - stable_sleep_start_at) * 1000),
+        "read_slide_id_b": round((slide_id_b_end_at - slide_id_b_start_at) * 1000),
+        "capture_b": round((screenshot_b_received_at - screenshot_b_start_at) * 1000),
+    }
+    slow_operations = ",".join(f"{name}:{duration}" for name, duration in durations.items() if duration > 1000)
     log_line(
         log_file,
         config,
@@ -630,10 +667,21 @@ def log_stability_pair(log_file: Path, config: Any, stats: CaptureStats, first: 
             f"attempt={stats.attempts}",
             f"slide_id_a={slide_id_a or '-'}",
             f"slide_id_b={slide_id_b or '-'}",
-            f"screenshot_a_at={round(captured_a_at, 3)}",
-            f"screenshot_b_at={round(captured_b_at, 3)}",
-            f"actual_stable_gap_ms={round((captured_b_at - captured_a_at) * 1000)}",
-            f"complete_attempt_duration_ms={round((captured_b_at - attempt_started_at) * 1000)}",
+            f"slide_id_a_read_ms={durations['read_slide_id_a']}",
+            f"screenshot_a_start_at={round(screenshot_a_start_at, 3)}",
+            f"screenshot_a_received_at={round(screenshot_a_received_at, 3)}",
+            f"stable_sleep_start_at={round(stable_sleep_start_at, 3)}",
+            f"stable_sleep_end_at={round(stable_sleep_end_at, 3)}",
+            f"slide_id_b_read_ms={durations['read_slide_id_b']}",
+            f"screenshot_b_start_at={round(screenshot_b_start_at, 3)}",
+            f"screenshot_b_received_at={round(screenshot_b_received_at, 3)}",
+            f"configured_stable_gap_ms={config.stable_gap_ms}",
+            f"actual_sleep_ms={round((stable_sleep_end_at - stable_sleep_start_at) * 1000)}",
+            f"capture_a_duration_ms={durations['capture_a']}",
+            f"capture_b_duration_ms={durations['capture_b']}",
+            f"actual_stable_gap_ms={round((screenshot_b_start_at - screenshot_a_received_at) * 1000)}",
+            f"complete_attempt_duration_ms={round((screenshot_b_received_at - attempt_started_at) * 1000)}",
+            f"slow_operation={slow_operations or '-'}",
             f"raw_hash_a={image_hash(first)[:12]}",
             f"raw_hash_b={image_hash(second)[:12]}",
             f"dimensions_a={width_a}x{height_a}",
@@ -650,27 +698,33 @@ def log_stability_pair(log_file: Path, config: Any, stats: CaptureStats, first: 
 def stable_raw_capture(devtools: DevTools, config: Any, deadline: Deadline, delay_ms: int, log_file: Path | None = None, stats: CaptureStats | None = None, debug_dir: Path | None = None) -> StableCandidate:
     deadline_sleep(config.transition_wait_ms / 1000, deadline)
     attempt_started_at = time.monotonic()
-    first = capture_png(devtools, config)
-    captured_a_at = time.monotonic()
-    first_url = current_url(devtools)
-    slide_id_a = slide_id_from_url(first_url) or ""
+    slide_id_a_start_at = time.monotonic()
+    slide_id_a = read_slide_id_now(devtools)
+    slide_id_a_end_at = time.monotonic()
+    screenshot_a_start_at = time.monotonic()
+    first = capture_png(devtools, config, timeout=min(5.0, max(0.2, deadline.remaining())))
+    screenshot_a_received_at = time.monotonic()
+    stable_sleep_start_at = time.monotonic()
     deadline_sleep(effective_stable_gap_seconds(config, delay_ms), deadline)
-    captured_b_at = time.monotonic()
-    second = capture_png(devtools, config)
-    second_url = current_url(devtools)
-    slide_id_b = slide_id_from_url(second_url or first_url) or slide_id_a
+    stable_sleep_end_at = time.monotonic()
+    slide_id_b_start_at = time.monotonic()
+    slide_id_b = read_slide_id_now(devtools)
+    slide_id_b_end_at = time.monotonic()
+    screenshot_b_start_at = time.monotonic()
+    second = capture_png(devtools, config, timeout=min(5.0, max(0.2, deadline.remaining())))
+    screenshot_b_received_at = time.monotonic()
     diff = image_difference_percent(first, second)
     if slide_id_a and slide_id_b and slide_id_a != slide_id_b:
         if stats is not None:
             save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, first, second)
         if log_file is not None and stats is not None:
-            log_stability_pair(log_file, config, stats, first, second, slide_id_a, slide_id_b, captured_a_at, captured_b_at, attempt_started_at, diff, "transition_crossed", devtools)
+            log_stability_pair(log_file, config, stats, first, second, slide_id_a, slide_id_b, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, diff, "transition_crossed", devtools)
         raise TransitionCrossed(diff)
     if diff > config.image_difference_percent:
         if stats is not None:
             save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, first, second)
         if log_file is not None and stats is not None:
-            log_stability_pair(log_file, config, stats, first, second, slide_id_a, slide_id_b, captured_a_at, captured_b_at, attempt_started_at, diff, "unstable_candidate", devtools)
+            log_stability_pair(log_file, config, stats, first, second, slide_id_a, slide_id_b, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, diff, "unstable_candidate", devtools)
         raise UnstableCandidate(diff)
     return StableCandidate(second, image_hash(second), slide_id_b, diff)
 
@@ -910,11 +964,13 @@ def wait_for_rendered_slide_change(devtools: DevTools, config: Any, previous: St
         wait_for_paint_cycles(devtools)
         stats.change_poll_attempts += 1
         stats.attempts += 1
+        slide_id_a_start_at = time.monotonic()
+        slide_id = read_slide_id_now(devtools) or expected_slide_id
+        slide_id_a_end_at = time.monotonic()
         attempt_started_at = time.monotonic()
-        png = capture_png(devtools, config)
-        captured_a_at = time.monotonic()
-        url = current_url(devtools)
-        slide_id = slide_id_from_url(url) or expected_slide_id
+        screenshot_a_start_at = time.monotonic()
+        png = capture_png(devtools, config, timeout=min(5.0, max(0.2, deadline.remaining())))
+        screenshot_a_received_at = time.monotonic()
         record_slide_id(stats, slide_id)
         raw_diff = image_difference_percent(previous.raw_png, png)
         if raw_diff <= config.image_difference_percent:
@@ -922,23 +978,27 @@ def wait_for_rendered_slide_change(devtools: DevTools, config: Any, previous: St
             deadline_sleep(config.change_poll_ms / 1000, deadline)
             continue
 
+        stable_sleep_start_at = time.monotonic()
         deadline_sleep(effective_stable_gap_seconds(config, delay_ms), deadline)
-        captured_b_at = time.monotonic()
-        second = capture_png(devtools, config)
-        second_url = current_url(devtools)
-        second_slide_id = slide_id_from_url(second_url) or slide_id
+        stable_sleep_end_at = time.monotonic()
+        slide_id_b_start_at = time.monotonic()
+        second_slide_id = read_slide_id_now(devtools) or slide_id
+        slide_id_b_end_at = time.monotonic()
+        screenshot_b_start_at = time.monotonic()
+        second = capture_png(devtools, config, timeout=min(5.0, max(0.2, deadline.remaining())))
+        screenshot_b_received_at = time.monotonic()
         record_slide_id(stats, second_slide_id)
         stability_diff = image_difference_percent(png, second)
         if slide_id and second_slide_id and slide_id != second_slide_id:
             stats.transition_crossed_attempts += 1
             save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, png, second)
-            log_stability_pair(log_file, config, stats, png, second, slide_id, second_slide_id, captured_a_at, captured_b_at, attempt_started_at, stability_diff, "transition_crossed", devtools)
+            log_stability_pair(log_file, config, stats, png, second, slide_id, second_slide_id, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, stability_diff, "transition_crossed", devtools)
             deadline_sleep(max(0.2, config.change_poll_ms / 1000), deadline)
             continue
         if stability_diff > config.image_difference_percent:
             stats.unstable_candidate_attempts += 1
             save_stability_debug_pair(debug_dir if stability_debug_enabled(config) else None, stats, png, second)
-            log_stability_pair(log_file, config, stats, png, second, slide_id, second_slide_id, captured_a_at, captured_b_at, attempt_started_at, stability_diff, "unstable_candidate", devtools)
+            log_stability_pair(log_file, config, stats, png, second, slide_id, second_slide_id, slide_id_a_start_at, slide_id_a_end_at, screenshot_a_start_at, screenshot_a_received_at, stable_sleep_start_at, stable_sleep_end_at, slide_id_b_start_at, slide_id_b_end_at, screenshot_b_start_at, screenshot_b_received_at, attempt_started_at, stability_diff, "unstable_candidate", devtools)
             log_rejected(log_file, config, stats, "unstable_candidate", StableCandidate(second, image_hash(second), second_slide_id, stability_diff), previous, started)
             deadline_sleep(max(0.2, config.change_poll_ms / 1000), deadline)
             continue
@@ -981,7 +1041,7 @@ def wait_for_visual_change(devtools: DevTools, config: Any, previous: StableCand
         stats.attempts += 1
         slide_id = ""
         try:
-            png = capture_png(devtools, config)
+            png = capture_png(devtools, config, timeout=min(5.0, max(0.2, deadline.remaining())))
             url = current_url(devtools)
             diff = image_difference_percent(previous.raw_png, png)
             slide_id = slide_id_from_url(url) or ""
@@ -1026,7 +1086,7 @@ def confirm_single_slide(devtools: DevTools, config: Any, first: StableCandidate
     end = time.monotonic() + min(confirm_seconds, deadline.remaining())
     while time.monotonic() < end:
         deadline_sleep(config.change_poll_ms / 1000, deadline)
-        png = capture_png(devtools, config)
+        png = capture_png(devtools, config, timeout=min(5.0, max(0.2, deadline.remaining())))
         if image_difference_percent(first.raw_png, png) > config.image_difference_percent:
             return False
     return True

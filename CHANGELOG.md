@@ -13,6 +13,7 @@ Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 - Screenshotcache ontkoppeld van de gewone presentatierefresh; alleen de screenshotcachetimer of een expliciete beheerstart activeert nog een capture.
 - Slide-ID-wijzigingen wachten nu op een werkelijk nieuw raw frame; onbetrouwbare 1-slidepublicatie wordt geweigerd wanneer meerdere slide-ID's gezien zijn.
 - Screenshotstabiliteit vergelijkt gedecodeerde RGB-pixels en kan tijdelijk begrensde A/B-debugbeelden bewaren met `SCREENSHOT_DEBUG_STABILITY=true`.
+- A/B-stabiliteitsmetingen nemen geen lange URL- of renderwachten meer tussen screenshot A en B op en loggen afzonderlijke timingvelden.
 - Documentatie toegevoegd in `docs/21-screenshot-cache.md`.
 
 ## 0.1.0
