@@ -26,6 +26,15 @@ CONTENT_URL="https://voorbeeld.school/dashboard"
 
 De actieve kiosk gebruikt Chromium met DevTools-poort `9222`. De screenshotcache gebruikt een aparte headless Chromium met standaardpoort `9333`, een eigen tijdelijk profiel en een eigen cachemap. De opname bestuurt de actieve kioskbrowser niet.
 
+`digitalsignage-refresh.timer` en `digitalsignage-screenshot-cache.timer` hebben een verschillend doel:
+
+* `digitalsignage-refresh.timer` vernieuwt alleen de actieve kioskpagina via DevTools op poort `9222`;
+* `digitalsignage-screenshot-cache.timer` start periodiek de offline-cacheopname via de aparte service en poort `9333`;
+* `REFRESH_SECONDS` bepaalt de gewone presentatie-refresh;
+* `SCREENSHOT_CACHE_REFRESH_SECONDS` bepaalt het interval voor de offline screenshotcache.
+
+Een mislukte screenshotcapture mag de gewone presentatierefresh niet blokkeren of opnieuw starten. De normale periodieke capture-start komt alleen van `digitalsignage-screenshot-cache.timer`, niet van `refresh-presentation.py`.
+
 De cache staat in:
 
 ```bash
@@ -45,7 +54,6 @@ Voer dit uit als kioskgebruiker:
 ```bash
 systemctl --user stop digitalsignage-screenshot-cache.timer
 systemctl --user stop digitalsignage-screenshot-cache.service
-rm -f ~/.local/state/digitalsignage/screenshot-cache.lock
 systemctl --user start digitalsignage-screenshot-cache.service
 systemctl --user status digitalsignage-screenshot-cache.service
 tail -50 ~/.local/state/digitalsignage/screenshot-cache.log
@@ -73,6 +81,33 @@ systemctl --user start digitalsignage-screenshot-cache.timer
 ```
 
 Een melding `active_capture_lock` betekent dat er al een opname loopt. De service start dan geen tweede Chromium en eindigt normaal. Bij instabiele dia-overgangen staan de eerste diagnostische pogingen in `screenshot-cache.log` met `candidate=unstable`; dat is geen technische fout en bewaart de bestaande cache tot er een stabiele dia is.
+
+## Pi-controle: refresh start geen capture
+
+Met deze controle bewijs je dat de gewone refreshtimer actief blijft zonder screenshotcapture te starten:
+
+```bash
+systemctl --user stop digitalsignage-screenshot-cache.timer
+systemctl --user disable digitalsignage-screenshot-cache.timer
+systemctl --user stop digitalsignage-screenshot-cache.service
+systemctl --user start digitalsignage-refresh.timer
+
+systemctl --user show digitalsignage-screenshot-cache.service \
+  --property=InvocationID \
+  --property=ActiveState \
+  --property=ExecMainStartTimestamp
+tail -1 ~/.local/state/digitalsignage/screenshot-cache.log
+ss -ltnp | grep ':9333' || true
+```
+
+Wacht minstens twee gewone refreshcycli en voer dezelfde drie controles opnieuw uit. `InvocationID`, `ExecMainStartTimestamp` en de laatste `cache=running`-logregel mogen niet gewijzigd zijn. Poort `9333` mag niet verschijnen. De kioskrefresh zelf controleer je apart met:
+
+```bash
+systemctl --user status digitalsignage-refresh.service
+journalctl --user -u digitalsignage-refresh.service -n 50 --no-pager
+```
+
+Verwijder `~/.local/state/digitalsignage/screenshot-cache.lock` nooit handmatig terwijl `digitalsignage-screenshot-cache.service` `activating` of `active` is, of terwijl poort `9333` actief is. Een lock mag alleen als stale lock verwijderd worden nadat de screenshotcachetimer gestopt is, de service gestopt is, geen capture-Chromium meer draait en geen `capture-content-cache.py`-proces meer actief is.
 
 ## Offline gedrag
 

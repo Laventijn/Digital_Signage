@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -106,26 +105,6 @@ def find_presentation_target(targets: list[dict[str, object]]) -> dict[str, obje
     return find_kiosk_target(targets)
 
 
-def trigger_screenshot_capture(config: dict[str, str]) -> None:
-    mode = content_mode(config)
-    if mode not in {"presentation", "website"}:
-        return
-    if not bool_config(config, "SCREENSHOT_CACHE_ENABLED", True):
-        return
-    # De opname loopt asynchroon in een aparte user-service. De refresh wacht
-    # niet op de headless Chromium en raakt de actieve kiosk niet aan.
-    try:
-        subprocess.run(
-            ["systemctl", "--user", "start", "digitalsignage-screenshot-cache.service"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return
-
-
 def navigate_presentation(config: dict[str, str]) -> None:
     mode = content_mode(config)
     if mode not in {"presentation", "website"}:
@@ -161,7 +140,6 @@ def navigate_presentation(config: dict[str, str]) -> None:
     finally:
         if ws is not None:
             ws.close()
-    trigger_screenshot_capture(config)
 
 
 def main() -> int:

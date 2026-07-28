@@ -7,6 +7,7 @@ import importlib.util
 import json
 import urllib.error
 from pathlib import Path
+from unittest import mock
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -114,6 +115,52 @@ def test_successful_page_navigate() -> None:
     }]
 
 
+def test_refresh_does_not_start_screenshot_cache() -> None:
+    module = load_module()
+    sent_messages: list[dict[str, object]] = []
+
+    class FakeConnection:
+        def send(self, payload: str) -> None:
+            sent_messages.append(json.loads(payload))
+
+        def recv(self) -> str:
+            return json.dumps({"id": 1, "result": {}})
+
+        def close(self) -> None:
+            pass
+
+    class FakeWebsocketModule:
+        WebSocketException = OSError
+
+        @staticmethod
+        def create_connection(_url: str, timeout: int):
+            return FakeConnection()
+
+    module.websocket = FakeWebsocketModule
+    module.fetch_targets = lambda host, port: [{
+        "type": "page",
+        "url": "https://docs.google.com/presentation/d/demo/present",
+        "webSocketDebuggerUrl": "ws://slides",
+    }]
+
+    with mock.patch("subprocess.run") as run:
+        for _ in range(3):
+            module.navigate_presentation({
+                "PRESENTATION_URL": "https://docs.google.com/presentation/d/demo/present?start=true&loop=true&delayms=5000",
+                "SCREENSHOT_CACHE_ENABLED": "true",
+            })
+
+    run.assert_not_called()
+    assert len(sent_messages) == 3
+
+
+def test_refresh_module_has_no_screenshot_service_start() -> None:
+    source = MODULE_PATH.read_text(encoding="utf-8")
+    assert "digitalsignage-screenshot-cache.service" not in source
+    assert "systemctl" not in source
+    assert "9333" not in source
+
+
 def test_websocket_error_response() -> None:
     def scenario(module):
         class FakeConnection:
@@ -190,6 +237,8 @@ def main() -> int:
     test_prefers_google_slides_target()
     test_falls_back_to_first_page_target()
     test_successful_page_navigate()
+    test_refresh_does_not_start_screenshot_cache()
+    test_refresh_module_has_no_screenshot_service_start()
     test_websocket_error_response()
     test_custom_devtools_host_and_port()
     print("Refresh-presentatietests OK.")

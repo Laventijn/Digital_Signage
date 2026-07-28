@@ -157,6 +157,15 @@ class ScreenshotCacheTests(unittest.TestCase):
             self.assertIn("OnBootSec=\nOnActiveSec=\nOnUnitActiveSec=\nOnUnitInactiveSec=", text)
             self.assertIn("OnUnitInactiveSec=${interval}s", text)
 
+    def test_screenshot_timer_default_is_fifteen_minutes(self):
+        timer_text = (ROOT_DIR / "services" / "digitalsignage-screenshot-cache.timer").read_text(encoding="utf-8")
+        install_text = (ROOT_DIR / "install" / "install.sh").read_text(encoding="utf-8")
+        upgrade_text = (ROOT_DIR / "install" / "upgrade.sh").read_text(encoding="utf-8")
+        self.assertIn("OnBootSec=900s", timer_text)
+        self.assertIn("OnUnitInactiveSec=900s", timer_text)
+        self.assertIn("SCREENSHOT_CACHE_REFRESH_SECONDS=900", install_text)
+        self.assertIn("SCREENSHOT_CACHE_REFRESH_SECONDS=900", upgrade_text)
+
     def test_png_dimensions_from_header(self):
         png = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + (800).to_bytes(4, "big") + (450).to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
         self.assertEqual(capture.png_dimensions(png), (800, 450))
