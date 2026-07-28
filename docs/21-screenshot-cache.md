@@ -82,6 +82,8 @@ systemctl --user start digitalsignage-screenshot-cache.timer
 
 Een melding `active_capture_lock` betekent dat er al een opname loopt. De service start dan geen tweede Chromium en eindigt normaal. Bij instabiele dia-overgangen staan de eerste diagnostische pogingen in `screenshot-cache.log` met `candidate=unstable`; dat is geen technische fout en bewaart de bestaande cache tot er een stabiele dia is.
 
+Wanneer Google Slides de `slide=`-URL al wijzigt maar Chromium nog het vorige beeld teruggeeft, wacht de capture op een werkelijk veranderde raw screenshot voordat een nieuwe dia stabiel kan worden geaccepteerd. Zodra meerdere niet-lege slide-ID's gezien zijn, wordt een 1-slidecache niet meer als `single_slide_confirmed` gepubliceerd; bij een onvolledige ronde blijft de bestaande cache behouden.
+
 ## Pi-controle: refresh start geen capture
 
 Met deze controle bewijs je dat de gewone refreshtimer actief blijft zonder screenshotcapture te starten:
@@ -108,6 +110,8 @@ journalctl --user -u digitalsignage-refresh.service -n 50 --no-pager
 ```
 
 Verwijder `~/.local/state/digitalsignage/screenshot-cache.lock` nooit handmatig terwijl `digitalsignage-screenshot-cache.service` `activating` of `active` is, of terwijl poort `9333` actief is. Een lock mag alleen als stale lock verwijderd worden nadat de screenshotcachetimer gestopt is, de service gestopt is, geen capture-Chromium meer draait en geen `capture-content-cache.py`-proces meer actief is.
+
+Een verdwenen tijdelijke werkmap na succesvolle publicatie is normaal: de publicatiestap verplaatst en ruimt die map al op. Alleen andere cleanupfouten worden nog als `cleanup_warning` gelogd.
 
 ## Offline gedrag
 

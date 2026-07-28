@@ -55,6 +55,24 @@ class DummyConfig:
     log_max_bytes = 5242880
     max_consecutive_failures = 2
     stable_gap_ms = 3000
+    transition_wait_ms = 750
+    change_poll_ms = 500
+    image_difference_percent = 2
+    single_slide_confirm_seconds = 1
+    max_slides = 10
+    capture_width = 1920
+    capture_height = 1080
+
+
+def png_bytes(marker: bytes) -> bytes:
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + b"\x00\x00\x00\rIHDR"
+        + (1920).to_bytes(4, "big")
+        + (1080).to_bytes(4, "big")
+        + b"\x08\x02\x00\x00\x00"
+        + marker
+    )
 
 
 class ScreenshotCacheTests(unittest.TestCase):
@@ -165,6 +183,98 @@ class ScreenshotCacheTests(unittest.TestCase):
         self.assertIn("OnUnitInactiveSec=900s", timer_text)
         self.assertIn("SCREENSHOT_CACHE_REFRESH_SECONDS=900", install_text)
         self.assertIn("SCREENSHOT_CACHE_REFRESH_SECONDS=900", upgrade_text)
+
+    def test_slide_id_change_waits_until_raw_frame_changes(self):
+        first = capture.StableCandidate(png_bytes(b"A"), capture.image_hash(png_bytes(b"A")), "id.A", 0)
+        stats = capture.CaptureStats()
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(capture, "deadline_sleep"), \
+                    mock.patch.object(capture, "wait_for_paint_cycles"), \
+                    mock.patch.object(capture, "runtime_diagnostics", return_value={"url": "https://x/present?slide=id.B", "readyState": "complete", "visibilityState": "visible", "now": 100}), \
+                    mock.patch.object(capture, "capture_png", side_effect=[png_bytes(b"A"), png_bytes(b"A"), png_bytes(b"A"), png_bytes(b"B"), png_bytes(b"B")]), \
+                    mock.patch.object(capture, "current_url", return_value="https://x/present?slide=id.B"):
+                candidate = capture.wait_for_visual_change(
+                    object(),
+                    DummyConfig(),
+                    first,
+                    capture.Deadline(30),
+                    time.monotonic(),
+                    stats,
+                    Path(tmp) / "capture.log",
+                    5000,
+                )
+        self.assertEqual(candidate.raw_hash, capture.image_hash(png_bytes(b"B")))
+        self.assertEqual(candidate.slide_id, "id.B")
+        self.assertIn("id.A", stats.observed_slide_ids)
+        self.assertIn("id.B", stats.observed_slide_ids)
+        self.assertTrue(stats.slide_id_changed)
+
+    def test_presentation_round_accepts_three_delayed_slide_changes(self):
+        first = capture.StableCandidate(png_bytes(b"A"), capture.image_hash(png_bytes(b"A")), "id.A", 0)
+        second = capture.StableCandidate(png_bytes(b"B"), capture.image_hash(png_bytes(b"B")), "id.B", 80)
+        third = capture.StableCandidate(png_bytes(b"C"), capture.image_hash(png_bytes(b"C")), "id.C", 80)
+        back_to_first = capture.StableCandidate(png_bytes(b"A"), capture.image_hash(png_bytes(b"A")), "id.A", 80)
+
+        def fake_save(_devtools, _config, _version_dir, candidate, images, stored_hashes):
+            stored_hash = f"stored-{candidate.slide_id}"
+            stored_hashes.append(stored_hash)
+            images.append({
+                "file": f"images/{candidate.slide_id}.png",
+                "raw_hash": candidate.raw_hash,
+                "stored_hash": stored_hash,
+                "slide_id": candidate.slide_id,
+            })
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(capture, "wait_ready"), \
+                    mock.patch.object(capture, "first_stable_raw_capture", return_value=first), \
+                    mock.patch.object(capture, "wait_for_visual_change", side_effect=[second, third, back_to_first]), \
+                    mock.patch.object(capture, "save_candidate", side_effect=fake_save), \
+                    mock.patch.object(capture, "write_player_files"):
+                manifest, stored_hashes, stats = capture.capture_presentation(
+                    object(),
+                    DummyConfig(),
+                    Path(tmp),
+                    capture.Deadline(30),
+                    Path(tmp) / "capture.log",
+                    time.monotonic(),
+                )
+
+        self.assertEqual(stats.stop_reason, "round_complete")
+        self.assertEqual(stats.stable, 3)
+        self.assertEqual(len(stored_hashes), 3)
+        self.assertEqual(len(manifest["images"]), 3)
+        self.assertEqual(manifest["stop_reason"], "round_complete")
+
+    def test_distinct_slide_ids_forbid_single_slide_success(self):
+        first = capture.StableCandidate(png_bytes(b"A"), capture.image_hash(png_bytes(b"A")), "id.A", 0)
+
+        def fake_wait(_devtools, _config, _previous, _deadline, _started, stats, _log_file, _delay_ms, max_seconds=None):
+            stats.observed_slide_ids.update({"id.A", "id.B"})
+            stats.visual_change_seen = True
+            if max_seconds is not None:
+                return None
+            raise capture.CaptureError("maximum captureduur bereikt")
+
+        def fake_save(_devtools, _config, _version_dir, candidate, images, stored_hashes):
+            stored_hashes.append("stored-A")
+            images.append({"file": "images/id.A.png", "raw_hash": candidate.raw_hash, "stored_hash": "stored-A", "slide_id": candidate.slide_id})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(capture, "wait_ready"), \
+                    mock.patch.object(capture, "first_stable_raw_capture", return_value=first), \
+                    mock.patch.object(capture, "wait_for_visual_change", side_effect=fake_wait), \
+                    mock.patch.object(capture, "save_candidate", side_effect=fake_save), \
+                    mock.patch.object(capture, "write_player_files"):
+                with self.assertRaises(capture.CaptureError):
+                    capture.capture_presentation(
+                        object(),
+                        DummyConfig(),
+                        Path(tmp),
+                        capture.Deadline(30),
+                        Path(tmp) / "capture.log",
+                        time.monotonic(),
+                    )
 
     def test_png_dimensions_from_header(self):
         png = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + (800).to_bytes(4, "big") + (450).to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"

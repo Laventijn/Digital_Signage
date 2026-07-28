@@ -15,7 +15,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -102,6 +102,9 @@ class CaptureStats:
     stop_reason: str = ""
     slide_id_changed: bool = False
     slide_id_reliable: bool = False
+    slide_id_state: str = "unknown"
+    visual_change_seen: bool = False
+    observed_slide_ids: set[str] = field(default_factory=set)
     stale_work_removed: int = 0
     stale_lock_removed: bool = False
 
@@ -401,6 +404,36 @@ def current_url(devtools: DevTools) -> str:
     return str(evaluate(devtools, "location.href", timeout=5) or "")
 
 
+def runtime_diagnostics(devtools: DevTools) -> dict[str, Any]:
+    try:
+        value = evaluate(devtools, """(() => ({
+  readyState: document.readyState,
+  visibilityState: document.visibilityState,
+  now: Math.round(performance.now()),
+  url: location.href
+}))()""", timeout=5)
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def wait_for_paint_cycles(devtools: DevTools) -> None:
+    try:
+        devtools.call("Page.bringToFront", timeout=5)
+    except Exception:
+        pass
+    try:
+        evaluate(devtools, """new Promise((resolve) => {
+  requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)));
+})""", timeout=5)
+    except Exception:
+        pass
+    try:
+        devtools.call("Page.getLayoutMetrics", timeout=5)
+    except Exception:
+        pass
+
+
 def image_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -633,6 +666,19 @@ def observe_slide_id_reliability(images: list[dict[str, Any]]) -> bool:
     return len(ids) >= 2 and len(set(ids)) == len(set(raw_hashes))
 
 
+def record_slide_id(stats: CaptureStats, slide_id: str) -> None:
+    if slide_id:
+        stats.observed_slide_ids.add(slide_id)
+
+
+def observed_distinct_slide_ids(stats: CaptureStats) -> bool:
+    return len(stats.observed_slide_ids) >= 2
+
+
+def can_confirm_single_slide(stats: CaptureStats) -> bool:
+    return not observed_distinct_slide_ids(stats) and not stats.visual_change_seen
+
+
 def candidate_dimensions(candidate: StableCandidate | None) -> str:
     if candidate is None or not candidate.raw_png:
         return "-"
@@ -674,6 +720,69 @@ def log_rejected(log_file: Path, config: Any, stats: CaptureStats, reason: str, 
         raise CaptureError("te veel opeenvolgende mislukte stable-capture-pogingen")
 
 
+def log_changed_candidate(log_file: Path, config: Any, stats: CaptureStats, previous: StableCandidate, slide_id: str, raw_png: bytes, diff: float, started: float, phase: str, devtools: DevTools) -> None:
+    if stats.change_poll_attempts > 10 and stats.change_poll_attempts % 10 != 0:
+        return
+    diagnostics = runtime_diagnostics(devtools)
+    log_line(
+        log_file,
+        config,
+        " ".join([
+            f"mode={config.mode}",
+            f"attempt={stats.attempts}",
+            f"elapsed={round(time.monotonic() - started, 1)}",
+            f"url={sanitize_url_for_log(str(diagnostics.get('url') or config.effective_url))}",
+            f"page_url={sanitize_url_for_log(str(diagnostics.get('url') or ''))}",
+            f"target_id={getattr(devtools, 'target_id', '-') or '-'}",
+            f"slide_id={slide_id or '-'}",
+            f"previous_slide_id={previous.slide_id or '-'}",
+            f"raw_hash={image_hash(raw_png)[:12]}",
+            f"previous_raw_hash={previous.raw_hash[:12]}",
+            f"raw_difference={round(diff, 2)}",
+            f"visibility={diagnostics.get('visibilityState', '-')}",
+            f"ready={diagnostics.get('readyState', '-')}",
+            f"paint_now={diagnostics.get('now', '-')}",
+            f"phase={phase}",
+            "candidate=changed",
+        ]),
+    )
+
+
+def wait_for_rendered_slide_change(devtools: DevTools, config: Any, previous: StableCandidate, deadline: Deadline, started: float, stats: CaptureStats, log_file: Path, delay_ms: int, expected_slide_id: str) -> StableCandidate:
+    deadline_sleep(config.transition_wait_ms / 1000, deadline)
+    while deadline.remaining() > 0:
+        wait_for_paint_cycles(devtools)
+        stats.change_poll_attempts += 1
+        stats.attempts += 1
+        png = capture_png(devtools, config)
+        url = current_url(devtools)
+        slide_id = slide_id_from_url(url) or expected_slide_id
+        record_slide_id(stats, slide_id)
+        raw_diff = byte_difference_percent(previous.raw_png, png)
+        if raw_diff <= config.image_difference_percent:
+            log_changed_candidate(log_file, config, stats, previous, slide_id, png, raw_diff, started, "await_rendered_frame", devtools)
+            deadline_sleep(config.change_poll_ms / 1000, deadline)
+            continue
+
+        deadline_sleep(effective_stable_gap_seconds(config, delay_ms), deadline)
+        wait_for_paint_cycles(devtools)
+        second = capture_png(devtools, config)
+        second_url = current_url(devtools)
+        second_slide_id = slide_id_from_url(second_url) or slide_id
+        record_slide_id(stats, second_slide_id)
+        stability_diff = byte_difference_percent(png, second)
+        if stability_diff > config.image_difference_percent:
+            stats.unstable_candidate_attempts += 1
+            log_rejected(log_file, config, stats, "unstable_candidate", StableCandidate(second, image_hash(second), second_slide_id, stability_diff), previous, started)
+            deadline_sleep(max(0.2, config.change_poll_ms / 1000), deadline)
+            continue
+        candidate = StableCandidate(second, image_hash(second), second_slide_id, raw_diff)
+        log_changed_candidate(log_file, config, stats, previous, second_slide_id, second, raw_diff, started, "rendered_frame_stable", devtools)
+        return candidate
+    stats.stop_reason = "maximum_duration_reached"
+    raise CaptureError("maximum captureduur bereikt")
+
+
 def first_stable_raw_capture(devtools: DevTools, config: Any, deadline: Deadline, started: float, stats: CaptureStats, log_file: Path, delay_ms: int) -> StableCandidate:
     while deadline.remaining() > 0:
         stats.attempts += 1
@@ -694,6 +803,7 @@ def first_stable_raw_capture(devtools: DevTools, config: Any, deadline: Deadline
 
 
 def wait_for_visual_change(devtools: DevTools, config: Any, previous: StableCandidate, deadline: Deadline, started: float, stats: CaptureStats, log_file: Path, delay_ms: int, max_seconds: float | None = None) -> StableCandidate | None:
+    record_slide_id(stats, previous.slide_id)
     local_end = time.monotonic() + max_seconds if max_seconds is not None else None
     while deadline.remaining() > 0 and (local_end is None or time.monotonic() < local_end):
         deadline_sleep(config.change_poll_ms / 1000, deadline)
@@ -705,16 +815,21 @@ def wait_for_visual_change(devtools: DevTools, config: Any, previous: StableCand
             url = current_url(devtools)
             diff = byte_difference_percent(previous.raw_png, png)
             slide_id = slide_id_from_url(url) or ""
+            record_slide_id(stats, slide_id)
+            id_changed = bool(slide_id and previous.slide_id and slide_id != previous.slide_id)
+            if id_changed:
+                stats.slide_id_changed = True
+                stats.visual_change_seen = True
+                return wait_for_rendered_slide_change(devtools, config, previous, deadline, started, stats, log_file, delay_ms, slide_id)
             if diff <= config.image_difference_percent:
                 continue
+            stats.visual_change_seen = True
             candidate = stable_raw_capture(devtools, config, deadline, delay_ms)
             raw_diff = byte_difference_percent(previous.raw_png, candidate.raw_png)
             if raw_diff <= config.image_difference_percent:
                 log_rejected(log_file, config, stats, "change_not_distinct", candidate, previous, started)
                 continue
             candidate.difference_percent = raw_diff
-            id_changed = bool(slide_id and previous.slide_id and slide_id != previous.slide_id)
-            stats.slide_id_changed = stats.slide_id_changed or id_changed
             return candidate
         except UnstableCandidate as exc:
             stats.unstable_candidate_attempts += 1
@@ -781,6 +896,7 @@ def capture_presentation(devtools: DevTools, config: Any, version_dir: Path, dea
     stored_hashes: list[str] = []
 
     first = first_stable_raw_capture(devtools, config, deadline, started, stats, log_file, delay_ms)
+    record_slide_id(stats, first.slide_id)
     save_candidate(devtools, config, version_dir, first, images, stored_hashes)
     stats.stable += 1
     stats.consecutive_failures = 0
@@ -790,7 +906,8 @@ def capture_presentation(devtools: DevTools, config: Any, version_dir: Path, dea
     log_line(log_file, config, f"mode=presentation attempt={stats.attempts} phase=first_slide candidate=stable slide=accepted found={len(images)} slide_id={first.slide_id or '-'} raw_hash={first.raw_hash[:12]} stability_difference={round(first.difference_percent, 2)} dimensions={candidate_dimensions(first)}")
     early_candidate = wait_for_visual_change(devtools, config, previous, deadline, started, stats, log_file, delay_ms, max_seconds=single_confirm_seconds)
     if early_candidate is None:
-        stats.stop_reason = "single_slide_confirmed"
+        if can_confirm_single_slide(stats):
+            stats.stop_reason = "single_slide_confirmed"
     else:
         pending_candidate: StableCandidate | None = early_candidate
 
@@ -817,21 +934,28 @@ def capture_presentation(devtools: DevTools, config: Any, version_dir: Path, dea
                 break
             log_rejected(log_file, config, stats, "duplicate_raw_hash", candidate, previous, started)
             continue
+        record_slide_id(stats, candidate.slide_id)
         save_candidate(devtools, config, version_dir, candidate, images, stored_hashes)
         stats.stable += 1
         stats.consecutive_failures = 0
         previous = candidate
+        stats.slide_id_reliable = observe_slide_id_reliability(images)
+        stats.slide_id_state = "reliable" if stats.slide_id_reliable else "unknown"
         log_line(log_file, config, f"mode=presentation attempt={stats.attempts} phase=visual_change candidate=stable slide=accepted found={len(images)} slide_id={candidate.slide_id or '-'} raw_hash={candidate.raw_hash[:12]} raw_difference={round(candidate.difference_percent, 2)} dimensions={candidate_dimensions(candidate)}")
 
     if len(images) >= config.max_slides:
         stats.stop_reason = "max_slides_reached"
     if not stats.stop_reason and len(images) == 1:
-        if confirm_single_slide(devtools, config, first, deadline, delay_ms):
+        if can_confirm_single_slide(stats) and confirm_single_slide(devtools, config, first, deadline, delay_ms):
             stats.stop_reason = "single_slide_confirmed"
         else:
-            raise CaptureError("visuele verandering gezien maar geen betrouwbare tweede dia vastgelegd")
+            stats.stop_reason = "incomplete_round"
+            raise CaptureError("onvolledige presentatieronde: meerdere slide-ID's of veranderingen gezien maar te weinig stabiele dia's vastgelegd")
     if not images:
         raise CaptureError("geen stabiele presentatiedia gevonden")
+    if len(images) == 1 and not can_confirm_single_slide(stats):
+        stats.stop_reason = "incomplete_round"
+        raise CaptureError("onvolledige presentatieronde: een 1-slidecache zou onbetrouwbaar zijn")
     manifest = {
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "mode": "presentation",
@@ -845,6 +969,8 @@ def capture_presentation(devtools: DevTools, config: Any, version_dir: Path, dea
         "rejected_attempts": stats.rejected,
         "stop_reason": stats.stop_reason,
         "slide_id_reliable": stats.slide_id_reliable,
+        "slide_id_state": stats.slide_id_state,
+        "observed_slide_ids": sorted(stats.observed_slide_ids),
         "duration_seconds": round(time.monotonic() - started, 1),
     }
     write_player_files(version_dir, manifest)
@@ -898,6 +1024,7 @@ def run_capture(args: argparse.Namespace) -> int:
         process = start_chromium(raw_config, config, browser_dir)
         target = wait_for_target(config.capture_debug_port, deadline)
         devtools = DevTools(str(target["webSocketDebuggerUrl"]))
+        setattr(devtools, "target_id", str(target.get("id", "")))
         set_viewport(devtools, config)
         if config.mode == "website":
             manifest, stored_hashes, stats = capture_website(devtools, config, version_dir, deadline)
@@ -959,6 +1086,8 @@ def run_capture(args: argparse.Namespace) -> int:
         if work_root is not None:
             try:
                 shutil.rmtree(work_root, ignore_errors=False)
+            except FileNotFoundError:
+                pass
             except OSError as exc:
                 log_cleanup_warning(log_file, config, f"mode={config.mode} cleanup_warning=workdir_remove_failed reason={str(exc).replace(' ', '_')}")
         release_lock(lock_fd, state_dir)
