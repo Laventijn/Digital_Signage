@@ -8,6 +8,7 @@ Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 - `CONTENT_MODE` en `CONTENT_URL` toegevoegd; `PRESENTATION_URL` blijft fallback voor bestaande installaties.
 - Aparte headless Chromium-opname via `digitalsignage-screenshot-cache.service` en timer toegevoegd.
 - Health-check toont bij offline eerst een geldige screenshotcache en anders de bestaande offlinepagina.
+- Presentatieopname robuuster gemaakt met poll-gebaseerde diawisseling, raw/stored hashes, deadlinebewaking, lockcleanup en publicatie zonder Chromium-profieldata.
 - Documentatie toegevoegd in `docs/21-screenshot-cache.md`.
 
 ## 0.1.0

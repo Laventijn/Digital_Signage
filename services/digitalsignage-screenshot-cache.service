@@ -6,6 +6,10 @@ Documentation=file:/opt/digitalsignage/docs/21-screenshot-cache.md
 Type=oneshot
 ExecStart=/opt/digitalsignage/scripts/capture-content-cache.py
 Environment=CONFIG_FILE=/etc/digitalsignage/digitalsignage.conf
+SuccessExitStatus=75 SIGTERM
+TimeoutStartSec=20min
+TimeoutStopSec=45s
+KillMode=control-group
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

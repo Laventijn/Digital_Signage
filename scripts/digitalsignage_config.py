@@ -30,9 +30,11 @@ DEFAULTS: dict[str, str] = {
     "SCREENSHOT_CAPTURE_HEIGHT": "1080",
     "SCREENSHOT_CAPTURE_DEBUG_PORT": "9333",
     "SCREENSHOT_STABLE_GAP_MS": "400",
+    "SCREENSHOT_CHANGE_POLL_MS": "500",
     "SCREENSHOT_TRANSITION_WAIT_MS": "750",
     "SCREENSHOT_MAX_SLIDES": "100",
     "SCREENSHOT_MAX_CAPTURE_SECONDS": "900",
+    "SCREENSHOT_MAX_CONSECUTIVE_FAILURES": "10",
     "SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS": "15",
     "SCREENSHOT_IMAGE_DIFFERENCE_PERCENT": "2",
     "SCREENSHOT_CACHE_KEEP_VERSIONS": "2",
@@ -54,9 +56,11 @@ class ContentConfig:
     capture_height: int
     capture_debug_port: int
     stable_gap_ms: int
+    change_poll_ms: int
     transition_wait_ms: int
     max_slides: int
     max_capture_seconds: int
+    max_consecutive_failures: int
     single_slide_confirm_seconds: int
     image_difference_percent: int
     keep_versions: int
@@ -137,9 +141,11 @@ def build_content_config(raw: dict[str, str]) -> ContentConfig:
         capture_height=int_config(raw, "SCREENSHOT_CAPTURE_HEIGHT", 1080, warnings=warnings),
         capture_debug_port=int_config(raw, "SCREENSHOT_CAPTURE_DEBUG_PORT", 9333, warnings=warnings),
         stable_gap_ms=int_config(raw, "SCREENSHOT_STABLE_GAP_MS", 400, minimum=50, warnings=warnings),
+        change_poll_ms=int_config(raw, "SCREENSHOT_CHANGE_POLL_MS", 500, minimum=100, warnings=warnings),
         transition_wait_ms=int_config(raw, "SCREENSHOT_TRANSITION_WAIT_MS", 750, minimum=0, warnings=warnings),
         max_slides=int_config(raw, "SCREENSHOT_MAX_SLIDES", 100, warnings=warnings),
         max_capture_seconds=int_config(raw, "SCREENSHOT_MAX_CAPTURE_SECONDS", 900, warnings=warnings),
+        max_consecutive_failures=int_config(raw, "SCREENSHOT_MAX_CONSECUTIVE_FAILURES", 10, warnings=warnings),
         single_slide_confirm_seconds=int_config(raw, "SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS", 15, warnings=warnings),
         image_difference_percent=int_config(raw, "SCREENSHOT_IMAGE_DIFFERENCE_PERCENT", 2, minimum=0, warnings=warnings),
         keep_versions=int_config(raw, "SCREENSHOT_CACHE_KEEP_VERSIONS", 2, minimum=1, warnings=warnings),
@@ -215,6 +221,17 @@ def screenshot_cache_index_url(home: Path) -> str:
 
 
 def validate_cache_version(version_dir: Path) -> tuple[bool, str, dict[str, Any] | None]:
+    allowed_top_level = {"index.html", "player.css", "player.js", "manifest.json", "images"}
+    try:
+        top_level = {path.name for path in version_dir.iterdir()}
+    except OSError as exc:
+        return False, f"cacheversie is onleesbaar: {exc}", None
+    unexpected = sorted(top_level - allowed_top_level)
+    if unexpected:
+        return False, f"cacheversie bevat onverwachte bestanden of mappen: {', '.join(unexpected)}", None
+    images_dir = version_dir / "images"
+    if not images_dir.is_dir():
+        return False, "images-map ontbreekt", None
     manifest_file = version_dir / "manifest.json"
     try:
         manifest = json.loads(manifest_file.read_text(encoding="utf-8"))

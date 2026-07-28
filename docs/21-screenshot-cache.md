@@ -43,10 +43,20 @@ De log staat in:
 Voer dit uit als kioskgebruiker:
 
 ```bash
+systemctl --user stop digitalsignage-screenshot-cache.timer
 systemctl --user start digitalsignage-screenshot-cache.service
 systemctl --user status digitalsignage-screenshot-cache.service
 tail -50 ~/.local/state/digitalsignage/screenshot-cache.log
+systemctl --user start digitalsignage-screenshot-cache.timer
 ```
+
+Gebruik `Ctrl+C` niet als stopmechanisme voor een lopende user-service. Stop een lopende opname gecontroleerd met:
+
+```bash
+systemctl --user stop digitalsignage-screenshot-cache.service
+```
+
+Bij zo'n bewuste annulering ruimt het script de tijdelijke werkmap, het lockbestand en het eigen headless Chromium-proces op. De bestaande actieve cache blijft behouden.
 
 ## Offline gedrag
 
@@ -63,6 +73,8 @@ Iedere definitieve offlineafbeelding krijgt rechtsonder het watermerk uit `OFFLI
 ## Beperkingen
 
 Video, animaties en interactieve dashboards worden als stilstaand beeld opgeslagen. Een online URL moet zonder extra login zichtbaar zijn voor Chromium op de Pi.
+
+De screenshotservice heeft een vaste systemd-bovengrens van 20 minuten. De scriptconfiguratie `SCREENSHOT_MAX_CAPTURE_SECONDS` blijft de normale inhoudelijke capturelimiet; systemd voorkomt daarnaast dat de service onbeperkt in `activating` blijft hangen.
 
 ## Cache verwijderen
 

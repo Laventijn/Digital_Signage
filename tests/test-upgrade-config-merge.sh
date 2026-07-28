@@ -43,9 +43,11 @@ assert_contains '^SCREENSHOT_CAPTURE_WIDTH=1920$' "${missing_config}"
 assert_contains '^SCREENSHOT_CAPTURE_HEIGHT=1080$' "${missing_config}"
 assert_contains '^SCREENSHOT_CAPTURE_DEBUG_PORT=9333$' "${missing_config}"
 assert_contains '^SCREENSHOT_STABLE_GAP_MS=400$' "${missing_config}"
+assert_contains '^SCREENSHOT_CHANGE_POLL_MS=500$' "${missing_config}"
 assert_contains '^SCREENSHOT_TRANSITION_WAIT_MS=750$' "${missing_config}"
 assert_contains '^SCREENSHOT_MAX_SLIDES=100$' "${missing_config}"
 assert_contains '^SCREENSHOT_MAX_CAPTURE_SECONDS=900$' "${missing_config}"
+assert_contains '^SCREENSHOT_MAX_CONSECUTIVE_FAILURES=10$' "${missing_config}"
 assert_contains '^SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS=15$' "${missing_config}"
 assert_contains '^SCREENSHOT_IMAGE_DIFFERENCE_PERCENT=2$' "${missing_config}"
 assert_contains '^SCREENSHOT_CACHE_KEEP_VERSIONS=2$' "${missing_config}"
@@ -77,9 +79,11 @@ assert_contains '^DESKTOP_BACKGROUND_MODE=zoom$' "${missing_config}"
 [ "$(count_active_key SCREENSHOT_CAPTURE_HEIGHT "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_CAPTURE_DEBUG_PORT "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_STABLE_GAP_MS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CHANGE_POLL_MS "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_TRANSITION_WAIT_MS "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_MAX_SLIDES "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_MAX_CAPTURE_SECONDS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_MAX_CONSECUTIVE_FAILURES "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_IMAGE_DIFFERENCE_PERCENT "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_CACHE_KEEP_VERSIONS "${missing_config}")" -eq 1 ]
@@ -111,9 +115,11 @@ SCREENSHOT_CAPTURE_WIDTH=1280
 SCREENSHOT_CAPTURE_HEIGHT=720
 SCREENSHOT_CAPTURE_DEBUG_PORT=9444
 SCREENSHOT_STABLE_GAP_MS=250
+SCREENSHOT_CHANGE_POLL_MS=300
 SCREENSHOT_TRANSITION_WAIT_MS=500
 SCREENSHOT_MAX_SLIDES=12
 SCREENSHOT_MAX_CAPTURE_SECONDS=120
+SCREENSHOT_MAX_CONSECUTIVE_FAILURES=6
 SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS=8
 SCREENSHOT_IMAGE_DIFFERENCE_PERCENT=5
 SCREENSHOT_CACHE_KEEP_VERSIONS=4
@@ -147,9 +153,11 @@ assert_contains '^SCREENSHOT_CAPTURE_WIDTH=1280$' "${existing_config}"
 assert_contains '^SCREENSHOT_CAPTURE_HEIGHT=720$' "${existing_config}"
 assert_contains '^SCREENSHOT_CAPTURE_DEBUG_PORT=9444$' "${existing_config}"
 assert_contains '^SCREENSHOT_STABLE_GAP_MS=250$' "${existing_config}"
+assert_contains '^SCREENSHOT_CHANGE_POLL_MS=300$' "${existing_config}"
 assert_contains '^SCREENSHOT_TRANSITION_WAIT_MS=500$' "${existing_config}"
 assert_contains '^SCREENSHOT_MAX_SLIDES=12$' "${existing_config}"
 assert_contains '^SCREENSHOT_MAX_CAPTURE_SECONDS=120$' "${existing_config}"
+assert_contains '^SCREENSHOT_MAX_CONSECUTIVE_FAILURES=6$' "${existing_config}"
 assert_contains '^SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS=8$' "${existing_config}"
 assert_contains '^SCREENSHOT_IMAGE_DIFFERENCE_PERCENT=5$' "${existing_config}"
 assert_contains '^SCREENSHOT_CACHE_KEEP_VERSIONS=4$' "${existing_config}"
@@ -181,9 +189,11 @@ assert_contains '^DESKTOP_BACKGROUND_MODE=fit$' "${existing_config}"
 [ "$(count_active_key SCREENSHOT_CAPTURE_HEIGHT "${existing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_CAPTURE_DEBUG_PORT "${existing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_STABLE_GAP_MS "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CHANGE_POLL_MS "${existing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_TRANSITION_WAIT_MS "${existing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_MAX_SLIDES "${existing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_MAX_CAPTURE_SECONDS "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_MAX_CONSECUTIVE_FAILURES "${existing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS "${existing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_IMAGE_DIFFERENCE_PERCENT "${existing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_CACHE_KEEP_VERSIONS "${existing_config}")" -eq 1 ]
@@ -212,9 +222,11 @@ run_merge "${missing_config}"
 [ "$(count_active_key SCREENSHOT_CAPTURE_HEIGHT "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_CAPTURE_DEBUG_PORT "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_STABLE_GAP_MS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CHANGE_POLL_MS "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_TRANSITION_WAIT_MS "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_MAX_SLIDES "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_MAX_CAPTURE_SECONDS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_MAX_CONSECUTIVE_FAILURES "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_IMAGE_DIFFERENCE_PERCENT "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_CACHE_KEEP_VERSIONS "${missing_config}")" -eq 1 ]
