@@ -183,6 +183,10 @@ write_screenshot_timer() {
 Description=Digital Signage periodieke screenshotcache
 
 [Timer]
+OnBootSec=
+OnActiveSec=
+OnUnitActiveSec=
+OnUnitInactiveSec=
 OnBootSec=${interval}s
 OnUnitInactiveSec=${interval}s
 AccuracySec=60s
@@ -190,6 +194,22 @@ Unit=digitalsignage-screenshot-cache.service
 
 [Install]
 WantedBy=timers.target
+EOF
+}
+
+write_screenshot_timer_dropin() {
+  local dropin_dir="$1"
+  local interval
+  interval="$(screenshot_interval)"
+  install -d -m 0755 "${dropin_dir}"
+  cat > "${dropin_dir}/interval.conf" <<EOF
+[Timer]
+OnBootSec=
+OnActiveSec=
+OnUnitActiveSec=
+OnUnitInactiveSec=
+OnBootSec=${interval}s
+OnUnitInactiveSec=${interval}s
 EOF
 }
 
@@ -249,6 +269,7 @@ install_user_units() {
   write_refresh_timer "${user_unit_dir}/digitalsignage-refresh.timer"
   write_health_timer_dropin "${user_unit_dir}/digitalsignage-health.timer.d"
   write_screenshot_timer "${user_unit_dir}/digitalsignage-screenshot-cache.timer"
+  write_screenshot_timer_dropin "${user_unit_dir}/digitalsignage-screenshot-cache.timer.d"
   chown -R "${KIOSK_USER}:${user_group}" "${user_home}/.config"
 
   # Maak de gebruikersstatusmap voordat user-services starten. Resource-logging

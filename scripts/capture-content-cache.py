@@ -66,6 +66,18 @@ class CaptureCancelled(CaptureError):
     """Gecontroleerde annulering via SIGTERM of SIGINT."""
 
 
+class UnstableCandidate(CaptureError):
+    """Een mogelijke dia is nog in overgang; dit is geen technische fout."""
+
+    def __init__(self, difference_percent: float) -> None:
+        super().__init__(f"beeld is nog niet stabiel: verschil={difference_percent:.2f}%")
+        self.difference_percent = difference_percent
+
+
+class ActiveCaptureLock(CaptureError):
+    """Er loopt al een opname; dit is een normale timer-uitkomst."""
+
+
 STOP_REQUESTED = False
 
 
@@ -82,6 +94,8 @@ def install_signal_handlers() -> None:
 @dataclass
 class CaptureStats:
     attempts: int = 0
+    change_poll_attempts: int = 0
+    unstable_candidate_attempts: int = 0
     stable: int = 0
     rejected: int = 0
     consecutive_failures: int = 0
@@ -213,7 +227,7 @@ def acquire_lock(state_dir: Path) -> tuple[int, bool]:
                 raise CaptureError("lockbestand is een symlink; opname wordt geweigerd") from exc
             pid = read_lock_pid(lock_file)
             if pid > 0 and process_exists(pid) and process_is_capture_script(pid):
-                raise CaptureError("er loopt al een screenshotopname") from exc
+                raise ActiveCaptureLock("er loopt al een screenshotopname") from exc
             lock_file.unlink(missing_ok=True)
             stale_removed = True
 
@@ -228,7 +242,7 @@ def release_lock(fd: int | None, state_dir: Path) -> None:
     try:
         if not lock_file.is_symlink():
             lock_file.unlink()
-    except FileNotFoundError:
+    except OSError:
         pass
 
 
@@ -252,6 +266,13 @@ def log_line(log_file: Path, config: Any, line: str) -> None:
     rotate_log_if_needed(log_file, config.log_max_bytes, "screenshot-cache.log.1")
     with log_file.open("a", encoding="utf-8") as handle:
         handle.write(f"{now.isoformat(timespec='seconds')} {line}\n")
+
+
+def log_cleanup_warning(log_file: Path, config: Any, line: str) -> None:
+    try:
+        log_line(log_file, config, line)
+    except Exception:
+        pass
 
 
 def chromium_command(raw_config: dict[str, str], config: Any, browser_dir: Path) -> list[str]:
@@ -289,14 +310,17 @@ def start_chromium(raw_config: dict[str, str], config: Any, browser_dir: Path) -
 
 
 def stop_chromium(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        return
-    process.terminate()
     try:
-        process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait(timeout=5)
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+    except Exception:
+        return
 
 
 def deadline_sleep(seconds: float, deadline: Deadline) -> None:
@@ -444,16 +468,21 @@ def capture_png(devtools: DevTools, config: Any, watermark_text: str = "") -> by
     return png
 
 
-def stable_raw_capture(devtools: DevTools, config: Any, deadline: Deadline) -> StableCandidate:
+def effective_stable_gap_seconds(config: Any, delay_ms: int) -> float:
+    max_gap_ms = max(250, min(1000, max(250, delay_ms // 5)))
+    return min(config.stable_gap_ms, max_gap_ms) / 1000
+
+
+def stable_raw_capture(devtools: DevTools, config: Any, deadline: Deadline, delay_ms: int) -> StableCandidate:
     deadline_sleep(config.transition_wait_ms / 1000, deadline)
     first = capture_png(devtools, config)
     first_url = current_url(devtools)
-    deadline_sleep(config.stable_gap_ms / 1000, deadline)
+    deadline_sleep(effective_stable_gap_seconds(config, delay_ms), deadline)
     second = capture_png(devtools, config)
     second_url = current_url(devtools)
     diff = byte_difference_percent(first, second)
     if diff > config.image_difference_percent:
-        raise CaptureError(f"beeld is nog niet stabiel: verschil={diff:.2f}%")
+        raise UnstableCandidate(diff)
     return StableCandidate(second, image_hash(second), slide_id_from_url(second_url or first_url) or "", diff)
 
 
@@ -604,13 +633,22 @@ def observe_slide_id_reliability(images: list[dict[str, Any]]) -> bool:
     return len(ids) >= 2 and len(set(ids)) == len(set(raw_hashes))
 
 
-def log_rejected(log_file: Path, config: Any, stats: CaptureStats, reason: str, candidate: StableCandidate | None, previous: StableCandidate | None, started: float) -> None:
+def candidate_dimensions(candidate: StableCandidate | None) -> str:
+    if candidate is None or not candidate.raw_png:
+        return "-"
+    width, height = png_dimensions(candidate.raw_png)
+    return f"{width}x{height}" if width and height else "-"
+
+
+def log_rejected(log_file: Path, config: Any, stats: CaptureStats, reason: str, candidate: StableCandidate | None, previous: StableCandidate | None, started: float, technical_failure: bool = False) -> None:
     stats.rejected += 1
-    stats.consecutive_failures += 1
-    if stats.rejected <= 5 or stats.rejected % 5 == 0:
+    if technical_failure:
+        stats.consecutive_failures += 1
+    if stats.rejected <= 10 or stats.rejected % 10 == 0:
         slide_id = candidate.slide_id if candidate else ""
         previous_slide_id = previous.slide_id if previous else ""
         diff = candidate.difference_percent if candidate else -1
+        phase = "technical_error" if technical_failure else reason
         log_line(
             log_file,
             config,
@@ -621,21 +659,47 @@ def log_rejected(log_file: Path, config: Any, stats: CaptureStats, reason: str, 
                 f"url={sanitize_url_for_log(config.effective_url)}",
                 f"slide_id={slide_id or '-'}",
                 f"previous_slide_id={previous_slide_id or '-'}",
+                f"raw_hash={(candidate.raw_hash[:12] if candidate and candidate.raw_hash else '-')}",
+                f"previous_raw_hash={(previous.raw_hash[:12] if previous and previous.raw_hash else '-')}",
                 f"raw_difference={round(diff, 2)}",
-                "stable=false",
+                f"stability_difference={round(diff, 2) if reason == 'unstable_candidate' else '-'}",
+                f"dimensions={candidate_dimensions(candidate)}",
+                f"phase={phase.replace(' ', '_')}",
+                "candidate=unstable" if reason == "unstable_candidate" else "candidate=rejected",
                 f"reason={reason.replace(' ', '_')}",
             ]),
         )
-    if stats.consecutive_failures >= config.max_consecutive_failures:
+    if technical_failure and stats.consecutive_failures >= config.max_consecutive_failures:
         stats.stop_reason = "consecutive_failures"
         raise CaptureError("te veel opeenvolgende mislukte stable-capture-pogingen")
 
 
-def wait_for_visual_change(devtools: DevTools, config: Any, previous: StableCandidate, deadline: Deadline, started: float, stats: CaptureStats, log_file: Path, max_seconds: float | None = None) -> StableCandidate | None:
+def first_stable_raw_capture(devtools: DevTools, config: Any, deadline: Deadline, started: float, stats: CaptureStats, log_file: Path, delay_ms: int) -> StableCandidate:
+    while deadline.remaining() > 0:
+        stats.attempts += 1
+        try:
+            candidate = stable_raw_capture(devtools, config, deadline, delay_ms)
+            stats.consecutive_failures = 0
+            return candidate
+        except UnstableCandidate as exc:
+            stats.unstable_candidate_attempts += 1
+            log_rejected(log_file, config, stats, "unstable_candidate", StableCandidate(b"", "", "", exc.difference_percent), None, started)
+            deadline_sleep(config.change_poll_ms / 1000, deadline)
+        except CaptureError as exc:
+            if isinstance(exc, CaptureCancelled):
+                raise
+            log_rejected(log_file, config, stats, str(exc), None, None, started, technical_failure=True)
+    stats.stop_reason = "maximum_duration_reached"
+    raise CaptureError("maximum captureduur bereikt")
+
+
+def wait_for_visual_change(devtools: DevTools, config: Any, previous: StableCandidate, deadline: Deadline, started: float, stats: CaptureStats, log_file: Path, delay_ms: int, max_seconds: float | None = None) -> StableCandidate | None:
     local_end = time.monotonic() + max_seconds if max_seconds is not None else None
     while deadline.remaining() > 0 and (local_end is None or time.monotonic() < local_end):
         deadline_sleep(config.change_poll_ms / 1000, deadline)
+        stats.change_poll_attempts += 1
         stats.attempts += 1
+        slide_id = ""
         try:
             png = capture_png(devtools, config)
             url = current_url(devtools)
@@ -643,7 +707,7 @@ def wait_for_visual_change(devtools: DevTools, config: Any, previous: StableCand
             slide_id = slide_id_from_url(url) or ""
             if diff <= config.image_difference_percent:
                 continue
-            candidate = stable_raw_capture(devtools, config, deadline)
+            candidate = stable_raw_capture(devtools, config, deadline, delay_ms)
             raw_diff = byte_difference_percent(previous.raw_png, candidate.raw_png)
             if raw_diff <= config.image_difference_percent:
                 log_rejected(log_file, config, stats, "change_not_distinct", candidate, previous, started)
@@ -652,10 +716,15 @@ def wait_for_visual_change(devtools: DevTools, config: Any, previous: StableCand
             id_changed = bool(slide_id and previous.slide_id and slide_id != previous.slide_id)
             stats.slide_id_changed = stats.slide_id_changed or id_changed
             return candidate
+        except UnstableCandidate as exc:
+            stats.unstable_candidate_attempts += 1
+            log_rejected(log_file, config, stats, "unstable_candidate", StableCandidate(b"", "", slide_id, exc.difference_percent), previous, started)
+            deadline_sleep(max(0.2, config.change_poll_ms / 1000), deadline)
+            continue
         except CaptureError as exc:
             if isinstance(exc, CaptureCancelled):
                 raise
-            log_rejected(log_file, config, stats, str(exc), None, previous, started)
+            log_rejected(log_file, config, stats, str(exc), None, previous, started, technical_failure=True)
     if local_end is not None:
         return None
     stats.stop_reason = "maximum_duration_reached"
@@ -676,7 +745,7 @@ def confirm_single_slide(devtools: DevTools, config: Any, first: StableCandidate
 def capture_website(devtools: DevTools, config: Any, version_dir: Path, deadline: Deadline) -> tuple[dict[str, Any], list[str], CaptureStats]:
     stats = CaptureStats()
     wait_ready(devtools, deadline)
-    candidate = stable_raw_capture(devtools, config, deadline)
+    candidate = stable_raw_capture(devtools, config, deadline, DEFAULT_PRESENTATION_DELAY_MS)
     image, stored_hash = final_watermarked_capture(devtools, config)
     images_dir = version_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -689,6 +758,9 @@ def capture_website(devtools: DevTools, config: Any, version_dir: Path, deadline
         "source_url": sanitize_url_for_log(config.effective_url),
         "slide_seconds": max(1, DEFAULT_PRESENTATION_DELAY_MS // 1000),
         "capture_attempts": 1,
+        "change_poll_attempts": stats.change_poll_attempts,
+        "unstable_candidate_attempts": stats.unstable_candidate_attempts,
+        "accepted_slides": stats.stable,
         "rejected_attempts": 0,
         "stop_reason": stats.stop_reason,
         "slide_id_reliable": False,
@@ -708,15 +780,15 @@ def capture_presentation(devtools: DevTools, config: Any, version_dir: Path, dea
     images: list[dict[str, Any]] = []
     stored_hashes: list[str] = []
 
-    stats.attempts += 1
-    first = stable_raw_capture(devtools, config, deadline)
+    first = first_stable_raw_capture(devtools, config, deadline, started, stats, log_file, delay_ms)
     save_candidate(devtools, config, version_dir, first, images, stored_hashes)
     stats.stable += 1
     stats.consecutive_failures = 0
     previous = first
     first_raw_hash = first.raw_hash
     single_confirm_seconds = max(config.single_slide_confirm_seconds, int((2 * delay_ms + config.transition_wait_ms) / 1000))
-    early_candidate = wait_for_visual_change(devtools, config, previous, deadline, started, stats, log_file, max_seconds=single_confirm_seconds)
+    log_line(log_file, config, f"mode=presentation attempt={stats.attempts} phase=first_slide candidate=stable slide=accepted found={len(images)} slide_id={first.slide_id or '-'} raw_hash={first.raw_hash[:12]} stability_difference={round(first.difference_percent, 2)} dimensions={candidate_dimensions(first)}")
+    early_candidate = wait_for_visual_change(devtools, config, previous, deadline, started, stats, log_file, delay_ms, max_seconds=single_confirm_seconds)
     if early_candidate is None:
         stats.stop_reason = "single_slide_confirmed"
     else:
@@ -727,7 +799,7 @@ def capture_presentation(devtools: DevTools, config: Any, version_dir: Path, dea
             candidate = pending_candidate
             pending_candidate = None
         else:
-            candidate = wait_for_visual_change(devtools, config, previous, deadline, started, stats, log_file)
+            candidate = wait_for_visual_change(devtools, config, previous, deadline, started, stats, log_file, delay_ms)
         if candidate is None:
             continue
         stats.slide_id_reliable = observe_slide_id_reliability(images + [{"slide_id": candidate.slide_id, "raw_hash": candidate.raw_hash}])
@@ -749,7 +821,7 @@ def capture_presentation(devtools: DevTools, config: Any, version_dir: Path, dea
         stats.stable += 1
         stats.consecutive_failures = 0
         previous = candidate
-        log_line(log_file, config, f"mode=presentation attempt={stats.attempts} stable=true found={len(images)} slide_id={candidate.slide_id or '-'} raw_difference={round(candidate.difference_percent, 2)}")
+        log_line(log_file, config, f"mode=presentation attempt={stats.attempts} phase=visual_change candidate=stable slide=accepted found={len(images)} slide_id={candidate.slide_id or '-'} raw_hash={candidate.raw_hash[:12]} raw_difference={round(candidate.difference_percent, 2)} dimensions={candidate_dimensions(candidate)}")
 
     if len(images) >= config.max_slides:
         stats.stop_reason = "max_slides_reached"
@@ -767,6 +839,9 @@ def capture_presentation(devtools: DevTools, config: Any, version_dir: Path, dea
         "slide_seconds": slide_seconds,
         "images": images,
         "capture_attempts": stats.attempts,
+        "change_poll_attempts": stats.change_poll_attempts,
+        "unstable_candidate_attempts": stats.unstable_candidate_attempts,
+        "accepted_slides": stats.stable,
         "rejected_attempts": stats.rejected,
         "stop_reason": stats.stop_reason,
         "slide_id_reliable": stats.slide_id_reliable,
@@ -806,15 +881,20 @@ def run_capture(args: argparse.Namespace) -> int:
 
     cache_root.mkdir(parents=True, exist_ok=True)
     state_dir.mkdir(parents=True, exist_ok=True)
-    lock_fd, stats.stale_lock_removed = acquire_lock(state_dir)
-    work_root = safe_work_dir(cache_root)
-    stats.stale_work_removed = cleanup_stale_work(cache_root, work_root)
-    browser_dir = work_root / "browser"
-    version_dir = work_root / "version"
-    browser_dir.mkdir(parents=True, exist_ok=True)
-    version_dir.mkdir(parents=True, exist_ok=True)
-    log_line(log_file, config, f"mode={config.mode} cache=running url={sanitize_url_for_log(config.effective_url)} stale_work_removed={stats.stale_work_removed} stale_lock_removed={str(stats.stale_lock_removed).lower()}")
     try:
+        lock_fd, stats.stale_lock_removed = acquire_lock(state_dir)
+        work_root = safe_work_dir(cache_root)
+        stats.stale_work_removed = cleanup_stale_work(cache_root, work_root)
+        browser_dir = work_root / "browser"
+        version_dir = work_root / "version"
+        browser_dir.mkdir(parents=True, exist_ok=True)
+        version_dir.mkdir(parents=True, exist_ok=True)
+        delay_ms = parse_delayms(config.effective_url)
+        effective_gap_ms = round(effective_stable_gap_seconds(config, delay_ms) * 1000)
+        stable_gap_note = f" stable_gap_effective_ms={effective_gap_ms}"
+        if effective_gap_ms != config.stable_gap_ms:
+            stable_gap_note += f" stable_gap_configured_ms={config.stable_gap_ms} stable_gap_warning=effective_gap_below_slide_delay"
+        log_line(log_file, config, f"mode={config.mode} cache=running url={sanitize_url_for_log(config.effective_url)} stale_work_removed={stats.stale_work_removed} stale_lock_removed={str(stats.stale_lock_removed).lower()}{stable_gap_note}")
         process = start_chromium(raw_config, config, browser_dir)
         target = wait_for_target(config.capture_debug_port, deadline)
         devtools = DevTools(str(target["webSocketDebuggerUrl"]))
@@ -831,6 +911,9 @@ def run_capture(args: argparse.Namespace) -> int:
             " ".join([
                 f"mode={config.mode}",
                 f"attempts={stats.attempts}",
+                f"change_poll_attempts={stats.change_poll_attempts}",
+                f"unstable_candidate_attempts={stats.unstable_candidate_attempts}",
+                f"accepted_slides={stats.stable}",
                 f"stable={stats.stable}",
                 f"rejected={stats.rejected}",
                 f"found={len(stored_hashes)}",
@@ -846,20 +929,38 @@ def run_capture(args: argparse.Namespace) -> int:
         stats.stop_reason = "capture_cancelled"
         log_line(log_file, config, f"mode={config.mode} cache=preserved reason=capture_cancelled stop_reason=capture_cancelled duration={round(time.monotonic() - started, 1)}")
         return CANCEL_EXIT_CODE
-    except Exception:
+    except ActiveCaptureLock as exc:
+        stats.stop_reason = "active_capture_lock"
+        log_line(log_file, config, f"mode={config.mode} cache=unchanged reason=active_capture_lock stop_reason=active_capture_lock duration={round(time.monotonic() - started, 1)}")
+        print(f"Info: {exc}", file=sys.stderr)
+        return 0
+    except CaptureError as exc:
         if stats.stop_reason == "":
             stats.stop_reason = "failed"
-        raise
+        reason = "maximum_duration_reached" if "maximum captureduur" in str(exc) else str(exc).replace(" ", "_")
+        log_line(log_file, config, f"mode={config.mode} cache=preserved reason={reason} stop_reason={stats.stop_reason} duration={round(time.monotonic() - started, 1)}")
+        print(f"Fout: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        if stats.stop_reason == "":
+            stats.stop_reason = "failed"
+        reason = str(exc).replace(" ", "_") or exc.__class__.__name__
+        log_line(log_file, config, f"mode={config.mode} cache=preserved reason={reason} stop_reason={stats.stop_reason} duration={round(time.monotonic() - started, 1)}")
+        print(f"Fout: {exc}", file=sys.stderr)
+        return 1
     finally:
         if devtools is not None:
             try:
                 devtools.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_cleanup_warning(log_file, config, f"mode={config.mode} cleanup_warning=devtools_close_failed reason={str(exc).replace(' ', '_')}")
         if process is not None:
             stop_chromium(process)
         if work_root is not None:
-            shutil.rmtree(work_root, ignore_errors=True)
+            try:
+                shutil.rmtree(work_root, ignore_errors=False)
+            except OSError as exc:
+                log_cleanup_warning(log_file, config, f"mode={config.mode} cleanup_warning=workdir_remove_failed reason={str(exc).replace(' ', '_')}")
         release_lock(lock_fd, state_dir)
 
 
@@ -877,12 +978,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return run_capture(args)
     except CaptureError as exc:
-        raw_config = read_config(args.config_file)
-        config = build_content_config(raw_config)
-        home = Path(args.home).resolve() if args.home else current_home()
-        state_dir = Path(args.state_dir).resolve() if args.state_dir else screenshot_state_dir(home)
-        reason = "maximum_duration_reached" if "maximum captureduur" in str(exc) else str(exc).replace(" ", "_")
-        log_line(state_dir / "screenshot-cache.log", config, f"mode={config.mode} cache=preserved reason={reason} stop_reason={reason} duration=0")
         print(f"Fout: {exc}", file=sys.stderr)
         return 1
 

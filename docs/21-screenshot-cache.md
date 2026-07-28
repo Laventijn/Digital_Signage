@@ -44,6 +44,8 @@ Voer dit uit als kioskgebruiker:
 
 ```bash
 systemctl --user stop digitalsignage-screenshot-cache.timer
+systemctl --user stop digitalsignage-screenshot-cache.service
+rm -f ~/.local/state/digitalsignage/screenshot-cache.lock
 systemctl --user start digitalsignage-screenshot-cache.service
 systemctl --user status digitalsignage-screenshot-cache.service
 tail -50 ~/.local/state/digitalsignage/screenshot-cache.log
@@ -57,6 +59,20 @@ systemctl --user stop digitalsignage-screenshot-cache.service
 ```
 
 Bij zo'n bewuste annulering ruimt het script de tijdelijke werkmap, het lockbestand en het eigen headless Chromium-proces op. De bestaande actieve cache blijft behouden.
+
+Voor een Pi-hertest zonder timerinterferentie:
+
+```bash
+systemctl --user stop digitalsignage-screenshot-cache.timer
+systemctl --user reset-failed digitalsignage-screenshot-cache.service
+systemctl --user start digitalsignage-screenshot-cache.service
+journalctl --user -u digitalsignage-screenshot-cache.service -n 80 --no-pager
+tail -80 ~/.local/state/digitalsignage/screenshot-cache.log
+systemctl --user list-timers digitalsignage-screenshot-cache.timer
+systemctl --user start digitalsignage-screenshot-cache.timer
+```
+
+Een melding `active_capture_lock` betekent dat er al een opname loopt. De service start dan geen tweede Chromium en eindigt normaal. Bij instabiele dia-overgangen staan de eerste diagnostische pogingen in `screenshot-cache.log` met `candidate=unstable`; dat is geen technische fout en bewaart de bestaande cache tot er een stabiele dia is.
 
 ## Offline gedrag
 

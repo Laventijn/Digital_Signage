@@ -9,6 +9,7 @@ Alle noemenswaardige wijzigingen aan dit project worden hier bijgehouden.
 - Aparte headless Chromium-opname via `digitalsignage-screenshot-cache.service` en timer toegevoegd.
 - Health-check toont bij offline eerst een geldige screenshotcache en anders de bestaande offlinepagina.
 - Presentatieopname robuuster gemaakt met poll-gebaseerde diawisseling, raw/stored hashes, deadlinebewaking, lockcleanup en publicatie zonder Chromium-profieldata.
+- Pi-hertestfix: instabiele A/B-samples worden opnieuw geprobeerd in plaats van als technische fout te falen, capturelogs tonen echte duur en extra diagnostiek, en screenshotcache-timers resetten oude intervalinstellingen.
 - Documentatie toegevoegd in `docs/21-screenshot-cache.md`.
 
 ## 0.1.0

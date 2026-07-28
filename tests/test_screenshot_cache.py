@@ -48,7 +48,13 @@ capture = load_capture_module()
 
 
 class DummyConfig:
+    mode = "presentation"
+    effective_url = "https://slides.example/present?delayms=5000"
     keep_versions = 2
+    log_retention_days = 3
+    log_max_bytes = 5242880
+    max_consecutive_failures = 2
+    stable_gap_ms = 3000
 
 
 class ScreenshotCacheTests(unittest.TestCase):
@@ -119,6 +125,37 @@ class ScreenshotCacheTests(unittest.TestCase):
         config = cfg.build_content_config({})
         self.assertEqual(config.change_poll_ms, 500)
         self.assertEqual(config.max_consecutive_failures, 10)
+
+    def test_effective_stable_gap_is_bounded_below_slide_delay(self):
+        self.assertEqual(capture.effective_stable_gap_seconds(DummyConfig(), 5000), 1.0)
+        self.assertLessEqual(capture.effective_stable_gap_seconds(DummyConfig(), 3000), 1.0)
+
+    def test_unstable_candidate_does_not_increment_technical_failures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stats = capture.CaptureStats()
+            candidate = capture.StableCandidate(b"", "", "id.p2", 76.64)
+            capture.log_rejected(Path(tmp) / "capture.log", DummyConfig(), stats, "unstable_candidate", candidate, None, time.monotonic())
+        self.assertEqual(stats.rejected, 1)
+        self.assertEqual(stats.unstable_candidate_attempts, 0)
+        self.assertEqual(stats.consecutive_failures, 0)
+
+    def test_technical_failures_are_bounded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stats = capture.CaptureStats()
+            log_file = Path(tmp) / "capture.log"
+            capture.log_rejected(log_file, DummyConfig(), stats, "DevTools fout", None, None, time.monotonic(), technical_failure=True)
+            with self.assertRaises(capture.CaptureError):
+                capture.log_rejected(log_file, DummyConfig(), stats, "DevTools fout", None, None, time.monotonic(), technical_failure=True)
+        self.assertEqual(stats.consecutive_failures, 2)
+        self.assertEqual(stats.stop_reason, "consecutive_failures")
+
+    def test_screenshot_timer_resets_old_intervals(self):
+        install_text = (ROOT_DIR / "install" / "install.sh").read_text(encoding="utf-8")
+        upgrade_text = (ROOT_DIR / "install" / "upgrade.sh").read_text(encoding="utf-8")
+        for text in (install_text, upgrade_text):
+            self.assertIn("write_screenshot_timer_dropin()", text)
+            self.assertIn("OnBootSec=\nOnActiveSec=\nOnUnitActiveSec=\nOnUnitInactiveSec=", text)
+            self.assertIn("OnUnitInactiveSec=${interval}s", text)
 
     def test_png_dimensions_from_header(self):
         png = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + (800).to_bytes(4, "big") + (450).to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"

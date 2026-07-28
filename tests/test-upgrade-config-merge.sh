@@ -302,4 +302,20 @@ printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitInactiveSec=${interval}s
 ! printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitActiveSec='
 ! printf '%s\n' "${health_dropin_body}" | grep -q '^OnUnitInactiveSec=$'
 
+screenshot_timer_body="$(awk '/^write_screenshot_timer\(\)/,/^}/' "${ROOT_DIR}/install/upgrade.sh")"
+printf '%s\n' "${screenshot_timer_body}" | grep -q '^OnBootSec=$'
+printf '%s\n' "${screenshot_timer_body}" | grep -q '^OnActiveSec=$'
+printf '%s\n' "${screenshot_timer_body}" | grep -q '^OnUnitActiveSec=$'
+printf '%s\n' "${screenshot_timer_body}" | grep -q '^OnUnitInactiveSec=$'
+printf '%s\n' "${screenshot_timer_body}" | grep -q '^OnBootSec=${interval}s$'
+printf '%s\n' "${screenshot_timer_body}" | grep -q '^OnUnitInactiveSec=${interval}s$'
+
+screenshot_dropin_body="$(awk '/^write_screenshot_timer_dropin\(\)/,/^}/' "${ROOT_DIR}/install/upgrade.sh")"
+printf '%s\n' "${screenshot_dropin_body}" | grep -q '^OnBootSec=$'
+printf '%s\n' "${screenshot_dropin_body}" | grep -q '^OnActiveSec=$'
+printf '%s\n' "${screenshot_dropin_body}" | grep -q '^OnUnitActiveSec=$'
+printf '%s\n' "${screenshot_dropin_body}" | grep -q '^OnUnitInactiveSec=$'
+printf '%s\n' "${screenshot_dropin_body}" | grep -q '^OnBootSec=${interval}s$'
+printf '%s\n' "${screenshot_dropin_body}" | grep -q '^OnUnitInactiveSec=${interval}s$'
+
 echo "Upgradeconfiguratie-merge OK."
