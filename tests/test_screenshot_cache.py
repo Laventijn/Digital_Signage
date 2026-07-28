@@ -6,10 +6,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import struct
 import sys
 import tempfile
 import unittest
 import time
+import zlib
 from pathlib import Path
 from unittest import mock
 
@@ -62,17 +64,46 @@ class DummyConfig:
     max_slides = 10
     capture_width = 1920
     capture_height = 1080
+    stability_debug_enabled = False
+
+
+def png_chunk(kind: bytes, payload: bytes) -> bytes:
+    return len(payload).to_bytes(4, "big") + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+
+
+def png_solid(width: int, height: int, rgb: tuple[int, int, int], compresslevel: int = 6) -> bytes:
+    row = bytes(rgb) * width
+    raw = b"".join(b"\x00" + row for _ in range(height))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + png_chunk(b"IDAT", zlib.compress(raw, compresslevel))
+        + png_chunk(b"IEND", b"")
+    )
+
+
+def png_one_pixel_changed(width: int, height: int) -> bytes:
+    rows = []
+    for y in range(height):
+        pixels = bytearray(bytes((0, 0, 0)) * width)
+        if y == 0:
+            pixels[0:3] = bytes((255, 255, 255))
+        rows.append(b"\x00" + bytes(pixels))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + png_chunk(b"IDAT", zlib.compress(b"".join(rows), 6))
+        + png_chunk(b"IEND", b"")
+    )
 
 
 def png_bytes(marker: bytes) -> bytes:
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + b"\x00\x00\x00\rIHDR"
-        + (1920).to_bytes(4, "big")
-        + (1080).to_bytes(4, "big")
-        + b"\x08\x02\x00\x00\x00"
-        + marker
-    )
+    palette = {
+        b"A": (20, 40, 80),
+        b"B": (210, 80, 30),
+        b"C": (60, 190, 120),
+    }
+    return png_solid(64, 36, palette.get(marker, (120, 120, 120)))
 
 
 class ScreenshotCacheTests(unittest.TestCase):
@@ -143,6 +174,18 @@ class ScreenshotCacheTests(unittest.TestCase):
         config = cfg.build_content_config({})
         self.assertEqual(config.change_poll_ms, 500)
         self.assertEqual(config.max_consecutive_failures, 10)
+        self.assertFalse(config.stability_debug_enabled)
+
+    def test_pixel_difference_uses_decoded_png_pixels(self):
+        black_fast = png_solid(8, 8, (0, 0, 0), compresslevel=1)
+        black_slow = png_solid(8, 8, (0, 0, 0), compresslevel=9)
+        white = png_solid(8, 8, (255, 255, 255), compresslevel=6)
+        small_change = png_one_pixel_changed(8, 8)
+        self.assertEqual(capture.image_difference_percent(black_fast, black_slow), 0.0)
+        self.assertEqual(capture.image_difference_percent(black_fast, black_fast), 0.0)
+        self.assertAlmostEqual(capture.image_difference_percent(black_fast, white), 100.0)
+        self.assertGreater(capture.image_difference_percent(black_fast, small_change), 0.0)
+        self.assertLess(capture.image_difference_percent(black_fast, small_change), 2.0)
 
     def test_effective_stable_gap_is_bounded_below_slide_delay(self):
         self.assertEqual(capture.effective_stable_gap_seconds(DummyConfig(), 5000), 1.0)
@@ -209,6 +252,50 @@ class ScreenshotCacheTests(unittest.TestCase):
         self.assertIn("id.B", stats.observed_slide_ids)
         self.assertTrue(stats.slide_id_changed)
 
+    def test_transition_between_stability_pair_is_not_unstable(self):
+        first = capture.StableCandidate(png_bytes(b"A"), capture.image_hash(png_bytes(b"A")), "id.A", 0)
+        stats = capture.CaptureStats()
+        events: list[str] = []
+
+        def fake_sleep(seconds, _deadline):
+            events.append(f"sleep:{round(seconds, 1)}")
+
+        def fake_capture(_devtools, _config):
+            events.append("capture")
+            return captures.pop(0)
+
+        captures = [png_bytes(b"B"), png_bytes(b"B"), png_bytes(b"C"), png_bytes(b"B"), png_bytes(b"B")]
+        urls = [
+            "https://x/present?slide=id.B",
+            "https://x/present?slide=id.B",
+            "https://x/present?slide=id.C",
+            "https://x/present?slide=id.B",
+            "https://x/present?slide=id.B",
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.object(capture, "deadline_sleep", side_effect=fake_sleep), \
+                    mock.patch.object(capture, "wait_for_paint_cycles"), \
+                    mock.patch.object(capture, "runtime_diagnostics", return_value={"url": "https://x/present?slide=id.B"}), \
+                    mock.patch.object(capture, "capture_png", side_effect=fake_capture), \
+                    mock.patch.object(capture, "current_url", side_effect=urls):
+                candidate = capture.wait_for_visual_change(
+                    object(),
+                    DummyConfig(),
+                    first,
+                    capture.Deadline(30),
+                    time.monotonic(),
+                    stats,
+                    Path(tmp) / "capture.log",
+                    5000,
+                )
+
+        self.assertEqual(candidate.slide_id, "id.B")
+        self.assertEqual(candidate.raw_hash, capture.image_hash(png_bytes(b"B")))
+        self.assertEqual(stats.transition_crossed_attempts, 1)
+        self.assertEqual(stats.unstable_candidate_attempts, 0)
+        self.assertIn("sleep:1.0", events)
+
     def test_presentation_round_accepts_three_delayed_slide_changes(self):
         first = capture.StableCandidate(png_bytes(b"A"), capture.image_hash(png_bytes(b"A")), "id.A", 0)
         second = capture.StableCandidate(png_bytes(b"B"), capture.image_hash(png_bytes(b"B")), "id.B", 80)
@@ -249,7 +336,7 @@ class ScreenshotCacheTests(unittest.TestCase):
     def test_distinct_slide_ids_forbid_single_slide_success(self):
         first = capture.StableCandidate(png_bytes(b"A"), capture.image_hash(png_bytes(b"A")), "id.A", 0)
 
-        def fake_wait(_devtools, _config, _previous, _deadline, _started, stats, _log_file, _delay_ms, max_seconds=None):
+        def fake_wait(_devtools, _config, _previous, _deadline, _started, stats, _log_file, _delay_ms, max_seconds=None, debug_dir=None):
             stats.observed_slide_ids.update({"id.A", "id.B"})
             stats.visual_change_seen = True
             if max_seconds is not None:

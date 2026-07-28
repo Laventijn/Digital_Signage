@@ -35,6 +35,7 @@ DEFAULTS: dict[str, str] = {
     "SCREENSHOT_MAX_SLIDES": "100",
     "SCREENSHOT_MAX_CAPTURE_SECONDS": "900",
     "SCREENSHOT_MAX_CONSECUTIVE_FAILURES": "10",
+    "SCREENSHOT_DEBUG_STABILITY": "false",
     "SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS": "15",
     "SCREENSHOT_IMAGE_DIFFERENCE_PERCENT": "2",
     "SCREENSHOT_CACHE_KEEP_VERSIONS": "2",
@@ -61,6 +62,7 @@ class ContentConfig:
     max_slides: int
     max_capture_seconds: int
     max_consecutive_failures: int
+    stability_debug_enabled: bool
     single_slide_confirm_seconds: int
     image_difference_percent: int
     keep_versions: int
@@ -146,6 +148,7 @@ def build_content_config(raw: dict[str, str]) -> ContentConfig:
         max_slides=int_config(raw, "SCREENSHOT_MAX_SLIDES", 100, warnings=warnings),
         max_capture_seconds=int_config(raw, "SCREENSHOT_MAX_CAPTURE_SECONDS", 900, warnings=warnings),
         max_consecutive_failures=int_config(raw, "SCREENSHOT_MAX_CONSECUTIVE_FAILURES", 10, warnings=warnings),
+        stability_debug_enabled=bool_config(raw, "SCREENSHOT_DEBUG_STABILITY", False, warnings),
         single_slide_confirm_seconds=int_config(raw, "SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS", 15, warnings=warnings),
         image_difference_percent=int_config(raw, "SCREENSHOT_IMAGE_DIFFERENCE_PERCENT", 2, minimum=0, warnings=warnings),
         keep_versions=int_config(raw, "SCREENSHOT_CACHE_KEEP_VERSIONS", 2, minimum=1, warnings=warnings),

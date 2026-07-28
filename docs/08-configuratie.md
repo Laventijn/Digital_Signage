@@ -32,11 +32,19 @@ Zie `config/digitalsignage.conf.example` voor alle opties.
 - `HEALTH_STARTUP_GRACE_SECONDS`: wachttijd na kioskstart waarin niet opnieuw hersteld wordt; standaard `90`.
 - `HEALTH_LOG_RETENTION_DAYS`: aantal dagen dat health-logregels bewaard blijven; standaard `3`.
 - `HEALTH_LOG_MAX_BYTES`: maximale grootte van `health.log` voor rotatie.
+- `SCREENSHOT_CACHE_REFRESH_SECONDS`: interval voor de offline screenshotcache; standaard `900`.
+- `SCREENSHOT_DEBUG_STABILITY`: tijdelijke debugstand voor A/B-stabiliteitsbeelden; standaard `false`.
 
 De installer en upgrader schrijven `digitalsignage-refresh.timer` op basis van `REFRESH_SECONDS`. Een bestaande aangepaste waarde wordt bij upgrade niet overschreven.
 De resource-logtimer staat standaard op 10 minuten in `digitalsignage-resource-log.timer`.
 De installer en upgrader schrijven daarnaast een drop-in voor
 `digitalsignage-health.timer` op basis van `HEALTH_CHECK_SECONDS`.
+
+De gewone presentatierefresh en de screenshotcache hebben aparte timers.
+`REFRESH_SECONDS` vernieuwt alleen de actieve kioskpagina.
+`SCREENSHOT_CACHE_REFRESH_SECONDS` bepaalt wanneer de offline screenshotcache
+wordt opgenomen. Laat `SCREENSHOT_DEBUG_STABILITY` standaard op `false`; zet
+die alleen tijdelijk op `true` tijdens een gerichte Pi-debugtest.
 
 ## Health-Check
 

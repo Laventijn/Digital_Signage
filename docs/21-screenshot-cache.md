@@ -84,6 +84,14 @@ Een melding `active_capture_lock` betekent dat er al een opname loopt. De servic
 
 Wanneer Google Slides de `slide=`-URL al wijzigt maar Chromium nog het vorige beeld teruggeeft, wacht de capture op een werkelijk veranderde raw screenshot voordat een nieuwe dia stabiel kan worden geaccepteerd. Zodra meerdere niet-lege slide-ID's gezien zijn, wordt een 1-slidecache niet meer als `single_slide_confirmed` gepubliceerd; bij een onvolledige ronde blijft de bestaande cache behouden.
 
+Voor een gerichte Pi-debugtest kan tijdelijk extra A/B-diagnostiek worden ingeschakeld:
+
+```ini
+SCREENSHOT_DEBUG_STABILITY=true
+```
+
+Zet deze waarde na de test opnieuw op `false`. Bij mislukte stabiliteitsparen bewaart de lopende opname maximaal vijf paren onder de tijdelijke werkmap `~/.local/share/digitalsignage/screenshot-cache/work/capture-*/debug/`, bijvoorbeeld `stability-001-a.png` en `stability-001-b.png`. Deze beelden worden niet naar `versions/current` gepubliceerd en verdwijnen bij normale cleanup.
+
 ## Pi-controle: refresh start geen capture
 
 Met deze controle bewijs je dat de gewone refreshtimer actief blijft zonder screenshotcapture te starten:
