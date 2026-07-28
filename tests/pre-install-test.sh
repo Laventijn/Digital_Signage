@@ -10,11 +10,16 @@ init_test_context "pre-install"
 
 is_expected_preinstall_opt_warning() {
   local output="$1"
-  local line saw_execstart_warning=0
+  local line saw_unit_header=0 saw_execstart_warning=0
   while IFS= read -r line; do
     [ -z "${line}" ] && continue
     case "${line}" in
       *.service:|*.timer:)
+        saw_unit_header=1
+        ;;
+      *.service:\ Command\ /opt/digitalsignage/*" is not executable: No such file or directory"|*.timer:\ Command\ /opt/digitalsignage/*" is not executable: No such file or directory")
+        saw_unit_header=1
+        saw_execstart_warning=1
         ;;
       "Command /opt/digitalsignage/"*" is not executable: No such file or directory")
         saw_execstart_warning=1
@@ -26,7 +31,17 @@ is_expected_preinstall_opt_warning() {
   done <<EOF
 ${output}
 EOF
-  [ "${saw_execstart_warning}" -eq 1 ]
+  [ "${saw_unit_header}" -eq 1 ] && [ "${saw_execstart_warning}" -eq 1 ]
+}
+
+active_config_has_key() {
+  local key="$1"
+  local file="$2"
+  awk -F= -v key="${key}" '
+    /^[[:space:]]*#/ { next }
+    $1 ~ "^[[:space:]]*" key "[[:space:]]*$" { found=1 }
+    END { exit found ? 0 : 1 }
+  ' "${file}"
 }
 
 test_system() {
@@ -150,7 +165,7 @@ test_repository() {
     fi
   done
 
-  for file in install/install.sh install/upgrade.sh install/uninstall.sh scripts/start-kiosk.sh scripts/refresh-kiosk.sh scripts/restart-chromium.sh scripts/health-check.sh scripts/health-check.py scripts/refresh-presentation.py scripts/log-resources.py scripts/configure-desktop-background.sh tests/test-desktop-background.sh; do
+  for file in install/install.sh install/upgrade.sh install/uninstall.sh scripts/start-kiosk.sh scripts/refresh-kiosk.sh scripts/restart-chromium.sh scripts/health-check.sh scripts/health-check.py scripts/refresh-presentation.py scripts/capture-content-cache.py scripts/log-resources.py scripts/configure-desktop-background.sh tests/test-desktop-background.sh; do
     if [ -x "${TEST_ROOT_DIR}/${file}" ]; then
       log_ok "Uitvoerbaar: ${file}"
     else
@@ -241,15 +256,24 @@ test_runner_sudo_handling() {
 }
 
 test_systemd_warning_classification() {
-  local expected_output bad_manager bad_syntax failed=0
+  local expected_output expected_single_line bad_manager bad_syntax bad_path failed=0
   expected_output=$'digitalsignage-resource-log.service:\nCommand /opt/digitalsignage/scripts/log-resources.py is not executable: No such file or directory'
+  expected_single_line="digitalsignage-screenshot-cache.service: Command /opt/digitalsignage/scripts/capture-content-cache.py is not executable: No such file or directory"
   bad_manager="Failed to initialize manager: No such device or address"
   bad_syntax="Unknown key name 'BogusDirective' in section 'Service', ignoring."
+  bad_path="digitalsignage-bad.service: Command /usr/local/bin/script.sh is not executable: No such file or directory"
 
   if is_expected_preinstall_opt_warning "${expected_output}"; then
-    log_ok "Ontbrekend /opt ExecStart-bestand wordt waarschuwing"
+    log_ok "Tweeregelige ontbrekende /opt ExecStart-melding wordt waarschuwing"
   else
-    log_error "Ontbrekend /opt ExecStart-bestand wordt niet als waarschuwing herkend"
+    log_error "Tweeregelige ontbrekende /opt ExecStart-melding wordt niet als waarschuwing herkend"
+    failed=1
+  fi
+
+  if is_expected_preinstall_opt_warning "${expected_single_line}"; then
+    log_ok "Eenregelige ontbrekende /opt ExecStart-melding wordt waarschuwing"
+  else
+    log_error "Eenregelige ontbrekende /opt ExecStart-melding wordt niet als waarschuwing herkend"
     failed=1
   fi
 
@@ -265,6 +289,13 @@ test_systemd_warning_classification() {
     failed=1
   else
     log_ok "Systemd-syntaxfout blijft een fout"
+  fi
+
+  if is_expected_preinstall_opt_warning "${bad_path}"; then
+    log_error "Ontbrekend ExecStart-bestand buiten /opt/digitalsignage wordt ten onrechte waarschuwing"
+    failed=1
+  else
+    log_ok "Ontbrekend ExecStart-bestand buiten /opt/digitalsignage blijft een fout"
   fi
 
   return "${failed}"
@@ -356,7 +387,7 @@ test_config() {
   local failed=0
   local config="${TEST_ROOT_DIR}/config/digitalsignage.conf.example"
   local key value
-  for key in CONTENT_MODE CONTENT_URL PRESENTATION_URL SCREENSHOT_CACHE_ENABLED SCREENSHOT_CACHE_REFRESH_SECONDS SCREENSHOT_CAPTURE_DEBUG_PORT OFFLINE_WATERMARK_TEXT WEBSITE_OFFLINE_CAPTURE_MODE OFFLINE_URL CHROMIUM_BIN WAYLAND_DISPLAY REMOTE_DEBUG_HOST REMOTE_DEBUG_PORT CACHE_SIZE_MB KIOSK_USER REFRESH_SECONDS SWAP_LOG_MAX_BYTES RESOURCE_LOG_RETENTION_DAYS HEALTH_CHECK_SECONDS HEALTH_FAILURE_THRESHOLD HEALTH_RESTART_COOLDOWN_SECONDS HEALTH_HTTP_TIMEOUT_SECONDS HEALTH_STARTUP_GRACE_SECONDS HEALTH_LOG_RETENTION_DAYS HEALTH_LOG_MAX_BYTES DESKTOP_BACKGROUND_ENABLED DESKTOP_BACKGROUND_FILE DESKTOP_BACKGROUND_MODE; do
+  for key in CONTENT_MODE PRESENTATION_URL SCREENSHOT_CACHE_ENABLED SCREENSHOT_CACHE_REFRESH_SECONDS SCREENSHOT_CAPTURE_DEBUG_PORT OFFLINE_WATERMARK_TEXT WEBSITE_OFFLINE_CAPTURE_MODE OFFLINE_URL CHROMIUM_BIN WAYLAND_DISPLAY REMOTE_DEBUG_HOST REMOTE_DEBUG_PORT CACHE_SIZE_MB KIOSK_USER REFRESH_SECONDS SWAP_LOG_MAX_BYTES RESOURCE_LOG_RETENTION_DAYS HEALTH_CHECK_SECONDS HEALTH_FAILURE_THRESHOLD HEALTH_RESTART_COOLDOWN_SECONDS HEALTH_HTTP_TIMEOUT_SECONDS HEALTH_STARTUP_GRACE_SECONDS HEALTH_LOG_RETENTION_DAYS HEALTH_LOG_MAX_BYTES DESKTOP_BACKGROUND_ENABLED DESKTOP_BACKGROUND_FILE DESKTOP_BACKGROUND_MODE; do
     if [ -n "$(read_config_value "${key}" "${config}")" ]; then
       log_ok "Configvariabele aanwezig: ${key}"
     else
@@ -364,7 +395,15 @@ test_config() {
       failed=1
     fi
   done
+  if active_config_has_key CONTENT_URL "${config}"; then
+    log_ok "Configvariabele aanwezig en mag leeg zijn: CONTENT_URL"
+  else
+    log_error "Configvariabele ontbreekt: CONTENT_URL"
+    failed=1
+  fi
 
+  value="$(read_config_value PRESENTATION_URL "${config}")"
+  [ -n "${value}" ] && log_ok "PRESENTATION_URL fallback is niet leeg" || { log_error "PRESENTATION_URL fallback is leeg"; failed=1; }
   value="$(read_config_value CHROMIUM_BIN "${config}")"
   [ "${value}" = "/usr/bin/chromium" ] && log_ok "CHROMIUM_BIN correct" || { log_error "CHROMIUM_BIN is '${value}'"; failed=1; }
   value="$(read_config_value REMOTE_DEBUG_HOST "${config}")"

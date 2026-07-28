@@ -39,7 +39,16 @@ assert_contains '^CONTENT_MODE="presentation"$' "${missing_config}"
 assert_contains '^CONTENT_URL=""$' "${missing_config}"
 assert_contains '^SCREENSHOT_CACHE_ENABLED=true$' "${missing_config}"
 assert_contains '^SCREENSHOT_CACHE_REFRESH_SECONDS=900$' "${missing_config}"
+assert_contains '^SCREENSHOT_CAPTURE_WIDTH=1920$' "${missing_config}"
+assert_contains '^SCREENSHOT_CAPTURE_HEIGHT=1080$' "${missing_config}"
 assert_contains '^SCREENSHOT_CAPTURE_DEBUG_PORT=9333$' "${missing_config}"
+assert_contains '^SCREENSHOT_STABLE_GAP_MS=400$' "${missing_config}"
+assert_contains '^SCREENSHOT_TRANSITION_WAIT_MS=750$' "${missing_config}"
+assert_contains '^SCREENSHOT_MAX_SLIDES=100$' "${missing_config}"
+assert_contains '^SCREENSHOT_MAX_CAPTURE_SECONDS=900$' "${missing_config}"
+assert_contains '^SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS=15$' "${missing_config}"
+assert_contains '^SCREENSHOT_IMAGE_DIFFERENCE_PERCENT=2$' "${missing_config}"
+assert_contains '^SCREENSHOT_CACHE_KEEP_VERSIONS=2$' "${missing_config}"
 assert_contains '^OFFLINE_WATERMARK_TEXT="Offline modus"$' "${missing_config}"
 assert_contains '^WEBSITE_OFFLINE_CAPTURE_MODE="latest"$' "${missing_config}"
 assert_contains '^RESOURCE_LOG_RETENTION_DAYS=3$' "${missing_config}"
@@ -64,6 +73,16 @@ assert_contains '^DESKTOP_BACKGROUND_MODE=zoom$' "${missing_config}"
 [ "$(count_active_key CONTENT_URL "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_CACHE_ENABLED "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_CACHE_REFRESH_SECONDS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CAPTURE_WIDTH "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CAPTURE_HEIGHT "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CAPTURE_DEBUG_PORT "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_STABLE_GAP_MS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_TRANSITION_WAIT_MS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_MAX_SLIDES "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_MAX_CAPTURE_SECONDS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_IMAGE_DIFFERENCE_PERCENT "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CACHE_KEEP_VERSIONS "${missing_config}")" -eq 1 ]
 [ "$(count_active_key OFFLINE_WATERMARK_TEXT "${missing_config}")" -eq 1 ]
 [ "$(count_active_key WEBSITE_OFFLINE_CAPTURE_MODE "${missing_config}")" -eq 1 ]
 [ "$(count_active_key RESOURCE_LOG_RETENTION_DAYS "${missing_config}")" -eq 1 ]
@@ -84,6 +103,22 @@ ls "${missing_config}".backup.* >/dev/null
 existing_config="${TEMP_DIR}/existing.conf"
 cat > "${existing_config}" <<'EOF'
 REFRESH_SECONDS=120
+CONTENT_MODE="website"
+CONTENT_URL="https://example.org/dashboard"
+SCREENSHOT_CACHE_ENABLED=false
+SCREENSHOT_CACHE_REFRESH_SECONDS=600
+SCREENSHOT_CAPTURE_WIDTH=1280
+SCREENSHOT_CAPTURE_HEIGHT=720
+SCREENSHOT_CAPTURE_DEBUG_PORT=9444
+SCREENSHOT_STABLE_GAP_MS=250
+SCREENSHOT_TRANSITION_WAIT_MS=500
+SCREENSHOT_MAX_SLIDES=12
+SCREENSHOT_MAX_CAPTURE_SECONDS=120
+SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS=8
+SCREENSHOT_IMAGE_DIFFERENCE_PERCENT=5
+SCREENSHOT_CACHE_KEEP_VERSIONS=4
+OFFLINE_WATERMARK_TEXT="Niet online"
+WEBSITE_OFFLINE_CAPTURE_MODE="latest"
 RESOURCE_LOG_RETENTION_DAYS=9
 HEALTH_CHECK_SECONDS=30
 HEALTH_FAILURE_THRESHOLD=5
@@ -104,6 +139,22 @@ DESKTOP_BACKGROUND_MODE=fit
 EOF
 run_merge "${existing_config}"
 assert_contains '^REFRESH_SECONDS=120$' "${existing_config}"
+assert_contains '^CONTENT_MODE="website"$' "${existing_config}"
+assert_contains '^CONTENT_URL="https://example.org/dashboard"$' "${existing_config}"
+assert_contains '^SCREENSHOT_CACHE_ENABLED=false$' "${existing_config}"
+assert_contains '^SCREENSHOT_CACHE_REFRESH_SECONDS=600$' "${existing_config}"
+assert_contains '^SCREENSHOT_CAPTURE_WIDTH=1280$' "${existing_config}"
+assert_contains '^SCREENSHOT_CAPTURE_HEIGHT=720$' "${existing_config}"
+assert_contains '^SCREENSHOT_CAPTURE_DEBUG_PORT=9444$' "${existing_config}"
+assert_contains '^SCREENSHOT_STABLE_GAP_MS=250$' "${existing_config}"
+assert_contains '^SCREENSHOT_TRANSITION_WAIT_MS=500$' "${existing_config}"
+assert_contains '^SCREENSHOT_MAX_SLIDES=12$' "${existing_config}"
+assert_contains '^SCREENSHOT_MAX_CAPTURE_SECONDS=120$' "${existing_config}"
+assert_contains '^SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS=8$' "${existing_config}"
+assert_contains '^SCREENSHOT_IMAGE_DIFFERENCE_PERCENT=5$' "${existing_config}"
+assert_contains '^SCREENSHOT_CACHE_KEEP_VERSIONS=4$' "${existing_config}"
+assert_contains '^OFFLINE_WATERMARK_TEXT="Niet online"$' "${existing_config}"
+assert_contains '^WEBSITE_OFFLINE_CAPTURE_MODE="latest"$' "${existing_config}"
 assert_contains '^RESOURCE_LOG_RETENTION_DAYS=9$' "${existing_config}"
 assert_contains '^HEALTH_CHECK_SECONDS=30$' "${existing_config}"
 assert_contains '^HEALTH_FAILURE_THRESHOLD=5$' "${existing_config}"
@@ -122,6 +173,22 @@ assert_contains '^DESKTOP_BACKGROUND_ENABLED=false$' "${existing_config}"
 assert_contains '^DESKTOP_BACKGROUND_FILE="/eigen/achtergrond.png"$' "${existing_config}"
 assert_contains '^DESKTOP_BACKGROUND_MODE=fit$' "${existing_config}"
 [ "$(count_active_key REFRESH_SECONDS "${existing_config}")" -eq 1 ]
+[ "$(count_active_key CONTENT_MODE "${existing_config}")" -eq 1 ]
+[ "$(count_active_key CONTENT_URL "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CACHE_ENABLED "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CACHE_REFRESH_SECONDS "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CAPTURE_WIDTH "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CAPTURE_HEIGHT "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CAPTURE_DEBUG_PORT "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_STABLE_GAP_MS "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_TRANSITION_WAIT_MS "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_MAX_SLIDES "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_MAX_CAPTURE_SECONDS "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_IMAGE_DIFFERENCE_PERCENT "${existing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CACHE_KEEP_VERSIONS "${existing_config}")" -eq 1 ]
+[ "$(count_active_key OFFLINE_WATERMARK_TEXT "${existing_config}")" -eq 1 ]
+[ "$(count_active_key WEBSITE_OFFLINE_CAPTURE_MODE "${existing_config}")" -eq 1 ]
 [ "$(count_active_key RESOURCE_LOG_RETENTION_DAYS "${existing_config}")" -eq 1 ]
 [ "$(count_active_key HEALTH_CHECK_SECONDS "${existing_config}")" -eq 1 ]
 [ "$(count_active_key HEALTH_FAILURE_THRESHOLD "${existing_config}")" -eq 1 ]
@@ -141,6 +208,16 @@ run_merge "${missing_config}"
 [ "$(count_active_key CONTENT_URL "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_CACHE_ENABLED "${missing_config}")" -eq 1 ]
 [ "$(count_active_key SCREENSHOT_CACHE_REFRESH_SECONDS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CAPTURE_WIDTH "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CAPTURE_HEIGHT "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CAPTURE_DEBUG_PORT "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_STABLE_GAP_MS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_TRANSITION_WAIT_MS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_MAX_SLIDES "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_MAX_CAPTURE_SECONDS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_SINGLE_SLIDE_CONFIRM_SECONDS "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_IMAGE_DIFFERENCE_PERCENT "${missing_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CACHE_KEEP_VERSIONS "${missing_config}")" -eq 1 ]
 [ "$(count_active_key OFFLINE_WATERMARK_TEXT "${missing_config}")" -eq 1 ]
 [ "$(count_active_key WEBSITE_OFFLINE_CAPTURE_MODE "${missing_config}")" -eq 1 ]
 [ "$(count_active_key RESOURCE_LOG_RETENTION_DAYS "${missing_config}")" -eq 1 ]
@@ -159,6 +236,9 @@ run_merge "${missing_config}"
 commented_config="${TEMP_DIR}/commented.conf"
 cat > "${commented_config}" <<'EOF'
 #REFRESH_SECONDS=60
+#CONTENT_MODE="website"
+#CONTENT_URL="https://example.org/commented"
+#SCREENSHOT_CAPTURE_WIDTH=800
 #RESOURCE_LOG_RETENTION_DAYS=12
 #HEALTH_CHECK_SECONDS=15
 #HEALTH_FAILURE_THRESHOLD=9
@@ -170,6 +250,9 @@ SWAP_LOG_MAX_BYTES=5242880
 EOF
 run_merge "${commented_config}"
 assert_contains '^#REFRESH_SECONDS=60$' "${commented_config}"
+assert_contains '^#CONTENT_MODE="website"$' "${commented_config}"
+assert_contains '^#CONTENT_URL="https://example.org/commented"$' "${commented_config}"
+assert_contains '^#SCREENSHOT_CAPTURE_WIDTH=800$' "${commented_config}"
 assert_contains '^#RESOURCE_LOG_RETENTION_DAYS=12$' "${commented_config}"
 assert_contains '^#HEALTH_CHECK_SECONDS=15$' "${commented_config}"
 assert_contains '^#HEALTH_FAILURE_THRESHOLD=9$' "${commented_config}"
@@ -178,14 +261,20 @@ assert_contains '^#OFFLINE_AFTER_SECONDS=15$' "${commented_config}"
 assert_contains '^#DESKTOP_BACKGROUND_ENABLED=false$' "${commented_config}"
 assert_contains '^#DESKTOP_BACKGROUND_MODE=center$' "${commented_config}"
 assert_contains '^REFRESH_SECONDS=300$' "${commented_config}"
+assert_contains '^CONTENT_MODE="presentation"$' "${commented_config}"
+assert_contains '^CONTENT_URL=""$' "${commented_config}"
+assert_contains '^SCREENSHOT_CAPTURE_WIDTH=1920$' "${commented_config}"
 assert_contains '^RESOURCE_LOG_RETENTION_DAYS=3$' "${commented_config}"
-assert_contains '^HEALTH_CHECK_SECONDS=60$' "${commented_config}"
+assert_contains '^HEALTH_CHECK_SECONDS=15$' "${commented_config}"
 assert_contains '^HEALTH_FAILURE_THRESHOLD=3$' "${commented_config}"
 assert_contains '^OFFLINE_PAGE_ENABLED=true$' "${commented_config}"
-assert_contains '^OFFLINE_AFTER_SECONDS=300$' "${commented_config}"
+assert_contains '^OFFLINE_AFTER_SECONDS=45$' "${commented_config}"
 assert_contains '^DESKTOP_BACKGROUND_ENABLED=true$' "${commented_config}"
 assert_contains '^DESKTOP_BACKGROUND_MODE=zoom$' "${commented_config}"
 [ "$(count_active_key REFRESH_SECONDS "${commented_config}")" -eq 1 ]
+[ "$(count_active_key CONTENT_MODE "${commented_config}")" -eq 1 ]
+[ "$(count_active_key CONTENT_URL "${commented_config}")" -eq 1 ]
+[ "$(count_active_key SCREENSHOT_CAPTURE_WIDTH "${commented_config}")" -eq 1 ]
 [ "$(count_active_key RESOURCE_LOG_RETENTION_DAYS "${commented_config}")" -eq 1 ]
 [ "$(count_active_key HEALTH_CHECK_SECONDS "${commented_config}")" -eq 1 ]
 [ "$(count_active_key HEALTH_FAILURE_THRESHOLD "${commented_config}")" -eq 1 ]
